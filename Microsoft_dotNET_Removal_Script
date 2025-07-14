@@ -1,0 +1,107 @@
+# PowerShell Script to Silently Uninstall .NET Versions, The script targets .NET SDK versions below 8.0.412 and .NET Runtime versions below 8.0.18.
+
+if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Exit
+}
+
+$sdkThreshold = "8.0.412"
+$dotnetThreshold = "8.0.18"
+
+function Compare-Version {
+    param($version1, $version2)
+    $v1 = [version]$version1
+    $v2 = [version]$version2
+    return $v1.CompareTo($v2)
+}
+
+$dotnetComponents = @()
+$dotnetComponents += Get-WmiObject -Class Win32_Product | Where-Object { 
+    $_.Name -like "*.NET*" -or 
+    $_.Name -like "*Microsoft ASP.NET*" -or 
+    $_.Name -like "*Microsoft Windows Desktop Runtime*" -or
+    $_.Name -like "*Microsoft .NET SDK*" -or
+    $_.Name -like "*Microsoft .NET Runtime*"
+}
+
+$uninstallKeys = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+
+$registryComponents = @()
+foreach ($key in $uninstallKeys) {
+    $registryComponents += Get-ItemProperty $key | Where-Object { 
+        $_.DisplayName -like "*.NET*" -or 
+        $_.DisplayName -like "*Microsoft ASP.NET*" -or 
+        $_.DisplayName -like "*Microsoft Windows Desktop Runtime*" -or
+        $_.DisplayName -like "*Microsoft .NET SDK*" -or
+        $_.DisplayName -like "*Microsoft .NET Runtime*"
+    }
+}
+
+$componentsToUninstall = @()
+foreach ($component in $dotnetComponents) {
+    $name = $component.Name
+    $versionMatch = [regex]::Match($name, '(\d+\.\d+\.\d+)')
+    if ($versionMatch.Success) {
+        $version = $versionMatch.Groups[1].Value
+        if ($name -like "*SDK*" -and (Compare-Version $version $sdkThreshold) -lt 0) {
+            $componentsToUninstall += $component
+        }
+        elseif ($name -like "*Runtime*" -and (Compare-Version $version $dotnetThreshold) -lt 0) {
+            $componentsToUninstall += $component
+        }
+    }
+}
+
+foreach ($component in $registryComponents) {
+    $name = $component.DisplayName
+    $versionMatch = [regex]::Match($name, '(\d+\.\d+\.\d+)')
+    if ($versionMatch.Success) {
+        $version = $versionMatch.Groups[1].Value
+        if ($name -like "*SDK*" -and (Compare-Version $version $sdkThreshold) -lt 0) {
+            $componentsToUninstall += $component
+        }
+        elseif ($name -like "*Runtime*" -and (Compare-Version $version $dotnetThreshold) -lt 0) {
+            $componentsToUninstall += $component
+        }
+    }
+}
+
+$uninstallCount = 0
+foreach ($component in $componentsToUninstall) {
+    if ($component.IdentifyingNumber) {
+        try {
+            $guid = $component.IdentifyingNumber
+            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $processInfo.FileName = "msiexec.exe"
+            $processInfo.Arguments = "/x $guid /quiet /norestart"
+            $processInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+            $processInfo.CreateNoWindow = $true
+            $process = [System.Diagnostics.Process]::Start($processInfo)
+            $process.WaitForExit()
+            $uninstallCount++
+        } catch {
+        }
+    } elseif ($component.UninstallString) {
+        $uninstallString = $component.UninstallString
+        if ($uninstallString -match "msiexec") {
+            $uninstallString = $uninstallString -replace "/I", "/X"
+            $uninstallString = "$uninstallString /quiet /norestart"
+        } elseif ($uninstallString -notlike "*quiet*") {
+            $uninstallString = "$uninstallString /quiet /S /silent"
+        }
+        
+        try {
+            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $processInfo.FileName = "cmd.exe"
+            $processInfo.Arguments = "/c $uninstallString"
+            $processInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+            $processInfo.CreateNoWindow = $true
+            $process = [System.Diagnostics.Process]::Start($processInfo)
+            $process.WaitForExit()
+            $uninstallCount++
+        } catch {
+        }
+    }
+}
