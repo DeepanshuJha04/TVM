@@ -21,13 +21,13 @@
     (e.g., .NET 8), you must update the targeting variable in this script.
 
     Exact Variable to Look For:
-    $explicitEolMajorVersions
+    $eolOrUnapprovedMajorVersions
 
     Current State (Explicitly targets EOL versions 1, 2, 3, 5, 6, and 7):
-    $explicitEolMajorVersions = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
+    $eolOrUnapprovedMajorVersions = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
 
     Future State (Example: How to update when .NET 8 goes EOL):
-    $explicitEolMajorVersions = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7, 8)
+    $eolOrUnapprovedMajorVersions = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7, 8)
     ===========================================================================
 #>
 
@@ -40,14 +40,14 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 
 # ==============================================================================
 # ⚠️ TARGET VARIABLE: UPDATE THIS WHEN A NEW EOL OR UNAPPROVED VERSION IS IDENTIFIED ⚠️
-$explicitEolMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
+$eolOrUnapprovedMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
 # ==============================================================================
 
 $dotNetFrameworkExclusionPattern    = '\.NET Framework'
-$dotNetProductDisplayNamePattern    = '^Microsoft (\.NET|ASP\.NET Core)|^\.NET Core|^dotnet-'
+$dotNetProductDisplayNamePattern    = '^Microsoft .*Runtime|^Microsoft (\.NET|ASP\.NET Core)|^\.NET Core|^dotnet-'
 $dotNetSdkNamePattern               = 'SDK|dotnet-sdk'
 $dotNetAspNetNamePattern            = 'ASP\.NET Core|dotnet-aspnetcore'
-$dotNetHostingBundleNamePattern     = 'Hosting Bundle|Windows Server Hosting|dotnet-hosting'
+$dotNetHostingBundleNamePattern     = 'Hosting Bundle|Windows Server Hosting|Hosting|dotnet-hosting'
 $dotNetDesktopRuntimeNamePattern    = 'Windows Desktop Runtime'
 $dotNetCoreRuntimeNamePattern       = 'Runtime|dotnet-runtime'
 $dotNetHostNamePattern              = 'Host FX Resolver|Host -|dotnet-host-'
@@ -69,6 +69,66 @@ $dotNetSdkSubFolderX86              = "$dotNetInstallRootFolderX86\sdk"
 $dotNetSharedRuntimeFolderX86       = "$dotNetInstallRootFolderX86\shared"
 
 $globalUninstallFailureDetected = $false
+
+if(Test-Path "$env:windir\CCM\Logs")
+{
+    $LogFile="$env:windir\CCM\Logs\DotNetCleanup.log"
+}
+else
+{
+    $LogFile="$env:TEMP\DotNetCleanup.log"
+}
+
+$script:rebootRequired = $false
+
+function Write-Log {
+    param([string]$Message)
+    try {
+        Add-Content -Path $LogFile -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$PID] $Message"
+    } catch {}
+}
+
+
+# ==============================================================================
+# ENTERPRISE PHASE LOGGING
+# ==============================================================================
+function Write-LogPhase {
+    param([string]$Title)
+
+    Write-Log "============================================================"
+    Write-Log $Title
+    Write-Log "============================================================"
+}
+
+$ScriptMetrics = [ordered]@{
+    ProductsDiscovered   = 0
+    EolTargets           = 0
+    ObsoletePatchTargets = 0
+    ToolSuccesses        = 0
+    ToolFailures         = 0
+    MsiSuccesses         = 0
+    MsiFailures          = 0
+    RegistrySuccesses    = 0
+    RegistryFailures     = 0
+    FileSuccesses        = 0
+    FileFailures         = 0
+}
+
+Write-LogPhase "PHASE 1 - SCRIPT INITIALIZATION"
+
+Write-Log "DotNet Cleanup Started"
+
+Write-LogPhase "PHASE 2 - PRE-CLEANUP VALIDATION"
+try {
+    $preInstalledSDKs = & dotnet --list-sdks 2>$null
+    $preInstalledRuntimes = & dotnet --list-runtimes 2>$null
+} catch {}
+
+if (Get-Process dotnet -ErrorAction SilentlyContinue) {
+    Write-Log "Running dotnet processes detected"
+    $script:rebootRequired = $true
+}
+
 
 $dotNetFilesystemFolderToComponentTypeMap = [ordered]@{
     $dotNetSdkSubFolder                                         = 'Sdk'
@@ -143,6 +203,7 @@ Get-ChildItem 'HKU:\' -ErrorAction SilentlyContinue | ForEach-Object {
 $deduplicationTracker = @{}
 $allDiscoveredDotNetProducts = [System.Collections.Generic.List[PSCustomObject]]::new()
 
+Write-LogPhase "PHASE 3 - PRODUCT DISCOVERY"
 foreach ($registrySearchPath in $allRegistrySearchLocations) {
     Get-ItemProperty $registrySearchPath -ErrorAction SilentlyContinue |
     Where-Object { $_.DisplayName -match $dotNetProductDisplayNamePattern -and $_.DisplayName -notmatch $dotNetFrameworkExclusionPattern } |
@@ -197,9 +258,10 @@ foreach ($aspNetRegistryRoot in @($aspNetSharedFrameworkRegistryRoot, $aspNetSha
     }
 }
 
+Write-LogPhase "PHASE 4 - VERSION ANALYSIS"
 $latestPatchVersionPerSupportedMajorAndType = @{}
 $allDiscoveredDotNetProducts |
-    Where-Object { -not $explicitEolMajorVersions.Contains($_.MajorVersionNumber) } |
+    Where-Object { -not $eolOrUnapprovedMajorVersions.Contains($_.MajorVersionNumber) } |
     Group-Object -Property @{Expression = { "$($_.ComponentType)|$($_.MajorVersionNumber)" }} |
     ForEach-Object {
         $groupKey = $_.Name
@@ -215,7 +277,7 @@ $sdkVersionsInstalledByMajorMinorPatch = $allDiscoveredDotNetProducts |
 $finalProductsTargetedForRemoval = $allDiscoveredDotNetProducts | Where-Object {
     $product = $_
     $componentGroupKey = "$($product.ComponentType)|$($product.MajorVersionNumber)"
-    $isExplicitEolVersion = $explicitEolMajorVersions.Contains($product.MajorVersionNumber)
+    $isExplicitEolVersion = $eolOrUnapprovedMajorVersions.Contains($product.MajorVersionNumber)
     $isOutdatedPatchOfSupportedMajor = (
         -not $isExplicitEolVersion -and
         $latestPatchVersionPerSupportedMajorAndType.ContainsKey($componentGroupKey) -and
@@ -233,25 +295,32 @@ $finalProductsTargetedForRemoval = $allDiscoveredDotNetProducts | Where-Object {
 
 $latestAspNetSharedFrameworkVersionPerMajor = @{}
 $allDiscoveredAspNetSharedFrameworks |
-    Where-Object { -not $explicitEolMajorVersions.Contains($_.MajorVersionNumber) } |
+    Where-Object { -not $eolOrUnapprovedMajorVersions.Contains($_.MajorVersionNumber) } |
     Group-Object -Property { $_.MajorVersionNumber } |
     ForEach-Object {
         $latestAspNetSharedFrameworkVersionPerMajor[$_.Name] = ($_.Group | Sort-Object ParsedVersion -Descending | Select-Object -First 1).ParsedVersion
     }
 
 $aspNetSharedFrameworksTargetedForRemoval = $allDiscoveredAspNetSharedFrameworks | Where-Object {
-    $explicitEolMajorVersions.Contains($_.MajorVersionNumber) -or
+    $eolOrUnapprovedMajorVersions.Contains($_.MajorVersionNumber) -or
     (
         $latestAspNetSharedFrameworkVersionPerMajor.ContainsKey("$($_.MajorVersionNumber)") -and
         $_.ParsedVersion -lt $latestAspNetSharedFrameworkVersionPerMajor["$($_.MajorVersionNumber)"]
     )
 }
 
+Write-LogPhase "PHASE 5 - TARGET SELECTION"
+Write-Log "Total discovered products: $($allDiscoveredDotNetProducts.Count)"
+Write-Log "Products targeted for removal: $(@($finalProductsTargetedForRemoval).Count)"
+Write-Log "ASP.NET targeted for removal: $(@($aspNetSharedFrameworksTargetedForRemoval).Count)"
+foreach ($item in @($finalProductsTargetedForRemoval)) { Write-Log "TARGET: $($item.DisplayName)" }
+
 if ((-not $finalProductsTargetedForRemoval -or @($finalProductsTargetedForRemoval).Count -eq 0) -and
     (-not $aspNetSharedFrameworksTargetedForRemoval -or @($aspNetSharedFrameworksTargetedForRemoval).Count -eq 0)) {
     Exit 0
 }
 
+Write-LogPhase "PHASE 6 - UNINSTALL TOOL DETECTION"
 $resolvedUninstallToolExePath = $null
 if (Test-Path $uninstallToolMsiFullPath) {
     Invoke-SilentProcessWithTimeout -ExecutablePath $msiexecExecutable -ProcessArguments "/i `"$uninstallToolMsiFullPath`" /qn /norestart" | Out-Null
@@ -267,7 +336,8 @@ if ($resolvedUninstallToolExePath) {
         'Desktop'       = '--windows-desktop-runtime'
         'HostingBundle' = '--hosting-bundle'
     }
-    @($finalProductsTargetedForRemoval) | ForEach-Object {
+    Write-LogPhase "PHASE 7 - UNINSTALL EXECUTION"
+@($finalProductsTargetedForRemoval) | ForEach-Object {
         $targetProduct = $_
         $toolFlag = $dotNetToolComponentTypeToFlagMap[$targetProduct.ComponentType]
         if ($toolFlag) {
@@ -319,9 +389,11 @@ if ($resolvedUninstallToolExePath -and @($aspNetSharedFrameworksTargetedForRemov
         $script:globalUninstallFailureDetected = $true
         return
     }
+    Write-Log "Uninstalling: $($targetProduct.DisplayName)"
     $silentUninstallCommand = Get-SilentUninstallCommandFromRawString -RawUninstallString $targetProduct.ResolvedUninstallString
     $parsedCommandParts = Split-CommandLineIntoExecutableAndArguments -FullCommandLine $silentUninstallCommand
     $uninstallExitCode = Invoke-SilentProcessWithTimeout -ExecutablePath $parsedCommandParts[0] -ProcessArguments $parsedCommandParts[1]
+    Write-Log "ExitCode: $uninstallExitCode for $($targetProduct.DisplayName)"
     if ($uninstallExitCode -notin @(0, 3010, 1605, 1614)) { $script:globalUninstallFailureDetected = $true }
 }
 
@@ -331,7 +403,7 @@ if ($resolvedUninstallToolExePath -and @($aspNetSharedFrameworksTargetedForRemov
         $script:globalUninstallFailureDetected = $true
         return
     }
-    $wmiQueryResult = Get-CimInstance -ClassName Win32_Product -Filter "IdentifyingNumber='$($targetProduct.MsiProductCode)'" -ErrorAction SilentlyContinue
+    $wmiQueryResult = $null
     if ($wmiQueryResult) {
         $cimUninstallResult = $wmiQueryResult | Invoke-CimMethod -MethodName Uninstall -ErrorAction SilentlyContinue
         if (-not $cimUninstallResult -or $cimUninstallResult.ReturnValue -ne 0) { $script:globalUninstallFailureDetected = $true }
@@ -340,6 +412,7 @@ if ($resolvedUninstallToolExePath -and @($aspNetSharedFrameworksTargetedForRemov
     }
 }
 
+Write-LogPhase "PHASE 8 - FILESYSTEM CLEANUP"
 $dotNetFilesystemFolderToComponentTypeMap.GetEnumerator() | ForEach-Object {
     $folderRootPath      = $_.Key
     $folderComponentType = $_.Value
@@ -352,7 +425,7 @@ $dotNetFilesystemFolderToComponentTypeMap.GetEnumerator() | ForEach-Object {
         $folderMajorVersion      = [int]$folderVersionRegexMatch.Groups[1].Value.Split('.')[0]
         $folderComponentGroupKey = "$folderComponentType|$folderMajorVersion"
         $shouldDeleteThisFolder  = (
-            $explicitEolMajorVersions.Contains($folderMajorVersion) -or
+            $eolOrUnapprovedMajorVersions.Contains($folderMajorVersion) -or
             (
                 $latestPatchVersionPerSupportedMajorAndType.ContainsKey($folderComponentGroupKey) -and
                 $parsedFolderVersion -lt $latestPatchVersionPerSupportedMajorAndType[$folderComponentGroupKey]
@@ -365,6 +438,7 @@ $dotNetFilesystemFolderToComponentTypeMap.GetEnumerator() | ForEach-Object {
     }
 }
 
+Write-LogPhase "PHASE 9 - REGISTRY CLEANUP"
 @($finalProductsTargetedForRemoval) | ForEach-Object {
     if (Get-ItemProperty $_.RegistryEntryPath -ErrorAction SilentlyContinue) {
         Remove-Item -Path $_.RegistryEntryPath -Recurse -Force -ErrorAction SilentlyContinue
@@ -386,4 +460,30 @@ if ($resolvedUninstallToolExePath) {
     }
 }
 
-if ($globalUninstallFailureDetected) { Exit 1 } else { Exit 0 }
+
+Write-LogPhase "PHASE 10 - POST CLEANUP VALIDATION"
+try {
+    $postInstalledSDKs = & dotnet --list-sdks 2>$null
+    $postInstalledRuntimes = & dotnet --list-runtimes 2>$null
+} catch {}
+
+
+Write-LogPhase "PHASE 11 - EXECUTION SUMMARY"
+Write-Log "Products Discovered: $($ScriptMetrics.ProductsDiscovered)"
+Write-Log "EOL/Unapproved Targets: $($ScriptMetrics.EolTargets)"
+Write-Log "Obsolete Patch Targets: $($ScriptMetrics.ObsoletePatchTargets)"
+Write-Log "Tool Successes: $($ScriptMetrics.ToolSuccesses)"
+Write-Log "Tool Failures: $($ScriptMetrics.ToolFailures)"
+Write-Log "Reboot Required: $script:rebootRequired"
+
+Write-Log "Cleanup Completed"
+
+if ($globalUninstallFailureDetected) {
+    Exit 1
+}
+
+if ($script:rebootRequired) {
+    Exit 3010
+}
+
+Exit 0
