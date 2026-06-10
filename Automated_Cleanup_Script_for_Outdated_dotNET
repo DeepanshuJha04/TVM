@@ -1,318 +1,364 @@
 <#
 .SYNOPSIS
-    Removes all .NET versions except the latest .NET 8 SDK and Runtimes.
+    Silently cleans up explicit EOL and superseded .NET (Core/5+) installations on Windows endpoints.
 
 .DESCRIPTION
-    This script cleans up outdated .NET installations on a Windows machine.
-    It keeps only the latest patch of .NET 8 (SDK, Runtime, ASP.NET, Desktop).
-    Everything else — older .NET versions like 6, 7, and any older .NET 8 patches — gets removed.
-    .NET Framework (3.5, 4.x, etc.) is never touched.
-
-    The script uses the Microsoft .NET Uninstall Tool as the primary removal method,
-    then falls back to registry uninstall strings for anything the tool missed,
-    and finally cleans up leftover folders and ghost registry entries.
-
-    The MSI for the uninstall tool must be placed in the same folder as this script.
+    Designed for SCCM Automatic Deployment Rules (ADR) as a silent, 
+    background-execution script. This script aggressively identifies and removes outdated or explicitly 
+    End-of-Life (EOL) .NET Runtimes, SDKs, ASP.NET Core Shared Frameworks, and Hosting Bundles. 
+    
+    It utilizes the official Microsoft .NET Uninstall Tool if available, falling back to direct 
+    MSI/WMI and registry removal methods to ensure zero vulnerable traces remain on the endpoint.
 
 .NOTES
-    Must be run as Administrator.
+    Execution Requirement: Must be executed as SYSTEM or an elevated local Administrator.
+    Output: Returns Exit Code 0 (Success) or 1 (Failure).
 
-    Exit Codes:
-        0 - Everything went fine.
-        1 - Something critical is missing or wrong (not admin / MSI not found / .NET 8 not installed).
+    ===========================================================================
+    MAINTENANCE GUIDE: UPDATING FOR FUTURE EOL VERSIONS
+    ===========================================================================
+    When Microsoft announces a new .NET major version has reached End of Life 
+    (e.g., .NET 8), you must update the targeting variable in this script.
+
+    Exact Variable to Look For:
+    $explicitEolMajorVersions
+
+    Current State (Explicitly targets EOL versions 1, 2, 3, 5, 6, and 7):
+    $explicitEolMajorVersions = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
+
+    Future State (Example: How to update when .NET 8 goes EOL):
+    $explicitEolMajorVersions = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7, 8)
+    ===========================================================================
 #>
 
-# ---------------------------------------------------------------
-# Settings — change TargetDotNetVersion if you ever want to keep
-# a different major version instead of 8.
-# ---------------------------------------------------------------
-$TargetDotNetVersion   = 8
-$UninstallToolMsiName  = "dotnet-core-uninstall.msi"
-$UninstallToolMsiPath  = Join-Path -Path $PSScriptRoot -ChildPath $UninstallToolMsiName
+$ErrorActionPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 
-# ---------------------------------------------------------------
-# Helper function — runs any executable silently in the background.
-# Kills the process if it takes longer than 2 minutes.
-# Returns the exit code, or -1 if something went wrong.
-# ---------------------------------------------------------------
-function Run-SilentProcess {
-    param(
-        [string]$ExecutablePath,
-        [string]$ProcessArguments,
-        [int]$TimeoutMilliseconds = 120000
-    )
-    try {
-        $startInfo                  = New-Object System.Diagnostics.ProcessStartInfo
-        $startInfo.FileName         = $ExecutablePath
-        $startInfo.Arguments        = $ProcessArguments
-        $startInfo.WindowStyle      = [System.Diagnostics.ProcessWindowStyle]::Hidden
-        $startInfo.CreateNoWindow   = $true
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Exit 1 }
 
-        $runningProcess = [System.Diagnostics.Process]::Start($startInfo)
-
-        if (-not $runningProcess.WaitForExit($TimeoutMilliseconds)) {
-            # Process is stuck — kill it and move on
-            $runningProcess.Kill()
-            return -1
-        }
-        return $runningProcess.ExitCode
-    } catch {
-        return -1
-    }
-}
-
-
-# ---------------------------------------------------------------
-# Check 1 — Script must run with admin rights
-# ---------------------------------------------------------------
-$currentUser     = [Security.Principal.WindowsIdentity]::GetCurrent()
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal($currentUser)
-$isAdministrator = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-
-if (-not $isAdministrator) { Exit 1 }
-
-
-# ---------------------------------------------------------------
-# Check 2 — The uninstall tool MSI must exist.
-# If it's missing, stop here — do not proceed.
-# ---------------------------------------------------------------
-if (-not (Test-Path $UninstallToolMsiPath)) { Exit 1 }
-
-
-# ---------------------------------------------------------------
-# Step 1 — Install the .NET Uninstall Tool silently
-# ---------------------------------------------------------------
-Start-Process msiexec.exe -ArgumentList "/i `"$UninstallToolMsiPath`" /qn /norestart" -Wait -NoNewWindow
-
-# Find where the tool was installed
-$UninstallToolExePath = $null
-$PossibleToolLocations = @(
+$explicitEolMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
+$dotNetFrameworkExclusionPattern    = '\.NET Framework'
+$dotNetProductDisplayNamePattern    = '^Microsoft (\.NET|ASP\.NET Core)|^\.NET Core|^dotnet-'
+$dotNetSdkNamePattern               = 'SDK|dotnet-sdk'
+$dotNetAspNetNamePattern            = 'ASP\.NET Core|dotnet-aspnetcore'
+$dotNetHostingBundleNamePattern     = 'Hosting Bundle|Windows Server Hosting|dotnet-hosting'
+$dotNetDesktopRuntimeNamePattern    = 'Windows Desktop Runtime'
+$dotNetCoreRuntimeNamePattern       = 'Runtime|dotnet-runtime'
+$dotNetHostNamePattern              = 'Host FX Resolver|Host -|dotnet-host-'
+$versionExtractionRegexPattern      = '(\d+\.\d+\.\d+)'
+$msiexecExecutable                  = 'msiexec.exe'
+$uninstallToolMsiFileName           = 'dotnet-core-uninstall.msi'
+$uninstallToolMsiFullPath           = Join-Path $PSScriptRoot $uninstallToolMsiFileName
+$uninstallToolPossibleExePaths      = @(
     "${env:ProgramFiles(x86)}\dotnet-core-uninstall\dotnet-core-uninstall.exe",
     "${env:ProgramFiles}\dotnet-core-uninstall\dotnet-core-uninstall.exe"
 )
-foreach ($location in $PossibleToolLocations) {
-    if (Test-Path $location) {
-        $UninstallToolExePath = $location
-        break
-    }
+$dotNetInstallRootFolder            = 'C:\Program Files\dotnet'
+$dotNetSdkSubFolder                 = "$dotNetInstallRootFolder\sdk"
+$dotNetSharedRuntimeFolder          = "$dotNetInstallRootFolder\shared"
+
+$globalUninstallFailureDetected = $false
+
+$dotNetFilesystemFolderToComponentTypeMap = [ordered]@{
+    $dotNetSdkSubFolder                                                   = 'Sdk'
+    "$dotNetSharedRuntimeFolder\Microsoft.NETCore.App"                    = 'Runtime'
+    "$dotNetSharedRuntimeFolder\Microsoft.WindowsDesktop.App"             = 'Desktop'
+    "$dotNetSharedRuntimeFolder\Microsoft.AspNetCore.App"                 = 'Asp'
 }
-# If the tool exe wasn't found, that's okay — the registry fallback below will still run.
+
+function Invoke-SilentProcessWithTimeout {
+    param([string]$ExecutablePath, [string]$ProcessArguments, [int]$TimeoutMilliseconds = 120000)
+    try {
+        $processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processStartInfo.FileName = $ExecutablePath
+        $processStartInfo.Arguments = $ProcessArguments
+        $processStartInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+        $processStartInfo.CreateNoWindow = $true
+        $launchedProcess = [System.Diagnostics.Process]::Start($processStartInfo)
+        if (-not $launchedProcess.WaitForExit($TimeoutMilliseconds)) { $launchedProcess.Kill(); return -1 }
+        return $launchedProcess.ExitCode
+    } catch { return -1 }
+}
+
+function Get-DotNetComponentTypeFromDisplayName {
+    param([string]$ProductDisplayName)
+    if ($ProductDisplayName -match $dotNetSdkNamePattern) { return 'Sdk' }
+    elseif ($ProductDisplayName -match $dotNetHostingBundleNamePattern) { return 'HostingBundle' }
+    elseif ($ProductDisplayName -match $dotNetAspNetNamePattern) { return 'Asp' }
+    elseif ($ProductDisplayName -match $dotNetDesktopRuntimeNamePattern) { return 'Desktop' }
+    elseif ($ProductDisplayName -match $dotNetHostNamePattern) { return 'Host' }
+    elseif ($ProductDisplayName -match $dotNetCoreRuntimeNamePattern) { return 'Runtime' }
+    return 'Unknown'
+}
+
+function Get-SilentUninstallCommandFromRawString {
+    param([string]$RawUninstallString)
+    $adjustedCommand = $RawUninstallString
+    if ($adjustedCommand -match $msiexecExecutable) {
+        $adjustedCommand = $adjustedCommand -replace '/I', '/X'
+        if ($adjustedCommand -notmatch '/quiet') { $adjustedCommand = "$adjustedCommand /quiet /norestart" }
+    } elseif ($adjustedCommand -notmatch '(?i)/quiet|/silent') {
+        $adjustedCommand = "$adjustedCommand /quiet /norestart"
+    }
+    return $adjustedCommand
+}
+
+function Split-CommandLineIntoExecutableAndArguments {
+    param([string]$FullCommandLine)
+    if ($FullCommandLine -match '^"(.*?)"\s*(.*)') { return @($Matches[1], $Matches[2]) }
+    $splitResult = $FullCommandLine -split ' ', 2
+    return @($splitResult[0], $(if ($splitResult.Count -gt 1) { $splitResult[1] } else { '' }))
+}
 
 
-# ---------------------------------------------------------------
-# Step 2 — Scan the registry to find all installed .NET products.
-# We look in both 64-bit and 32-bit registry locations.
-# We only care about .NET Core/5+ components — Framework is excluded.
-# ---------------------------------------------------------------
-$RegistrySearchPaths = @(
-    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+$allRegistrySearchLocations = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
 )
 
-$AllDotNetInstalls   = [System.Collections.Generic.List[PSCustomObject]]::new()
-$AlreadyAddedEntries = @{}   # Tracks Category+Version combos to avoid duplicates
-
-foreach ($registryPath in $RegistrySearchPaths) {
-    $matchingEntries = Get-ItemProperty $registryPath -ErrorAction SilentlyContinue | Where-Object {
-        # Only grab .NET Core/5+ products — SDK, Runtime, ASP.NET, Desktop
-        $_.DisplayName -match "^Microsoft \.NET (SDK|Runtime|Windows Desktop Runtime|ASP\.NET Core Runtime)" -and
-        # Hard rule — never touch anything that says "Framework"
-        $_.DisplayName -notmatch "Framework"
+if (-not (Get-PSDrive -Name HKU -ErrorAction SilentlyContinue)) {
+    New-PSDrive -Name HKU -PSProvider Registry -Root HKEY_USERS | Out-Null
+}
+Get-ChildItem 'HKU:\' -ErrorAction SilentlyContinue | ForEach-Object {
+    $perUserUninstallPath = "HKU:\$($_.PSChildName)\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    if (Test-Path "HKU:\$($_.PSChildName)\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall") {
+        $allRegistrySearchLocations += $perUserUninstallPath
     }
+}
 
-    foreach ($entry in $matchingEntries) {
-        $versionNumberMatch = [regex]::Match($entry.DisplayName, '(\d+\.\d+\.\d+)')
-        if (-not $versionNumberMatch.Success) { continue }
+$deduplicationTracker = @{}
+$allDiscoveredDotNetProducts = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-        # Figure out which type of component this is
-        $componentType = "Runtime"
-        if      ($entry.DisplayName -match "SDK")             { $componentType = "Sdk"     }
-        elseif  ($entry.DisplayName -match "ASP\.NET")        { $componentType = "Asp"     }
-        elseif  ($entry.DisplayName -match "Windows Desktop") { $componentType = "Desktop" }
+foreach ($registrySearchPath in $allRegistrySearchLocations) {
+    Get-ItemProperty $registrySearchPath -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -match $dotNetProductDisplayNamePattern -and $_.DisplayName -notmatch $dotNetFrameworkExclusionPattern } |
+    ForEach-Object {
+        $currentEntry = $_
+        $versionRegexMatch = [regex]::Match($currentEntry.DisplayName, $versionExtractionRegexPattern)
+        if (-not $versionRegexMatch.Success) { return }
+        $parsedProductVersion = [version]$versionRegexMatch.Groups[1].Value
+        $detectedComponentType = Get-DotNetComponentTypeFromDisplayName -ProductDisplayName $currentEntry.DisplayName
+        if ($detectedComponentType -eq 'Unknown') { return }
+        $deduplicationKey = "$detectedComponentType|$parsedProductVersion"
+        if ($deduplicationTracker.ContainsKey($deduplicationKey)) { return }
+        $deduplicationTracker[$deduplicationKey] = $true
+        $resolvedUninstallString = if ($currentEntry.QuietUninstallString) { $currentEntry.QuietUninstallString } else { $currentEntry.UninstallString }
+        $allDiscoveredDotNetProducts.Add([PSCustomObject]@{
+            DisplayName             = $currentEntry.DisplayName
+            ComponentType           = $detectedComponentType
+            ParsedVersion           = $parsedProductVersion
+            MajorVersionNumber      = [int]$versionRegexMatch.Groups[1].Value.Split('.')[0]
+            ResolvedUninstallString = $resolvedUninstallString
+            RegistryEntryPath       = $currentEntry.PSPath
+            MsiProductCode          = if ($currentEntry.PSChildName -match '^\{.*\}$') { $currentEntry.PSChildName } else { $null }
+        })
+    }
+}
 
-        $parsedVersion   = [version]$versionNumberMatch.Groups[1].Value
-        $deduplicateKey  = "$componentType|$parsedVersion"
+$aspNetSharedFrameworkRegistryRoot    = 'HKLM:\SOFTWARE\Microsoft\ASP.NET Core\Shared Framework'
+$aspNetSharedFrameworkRegistryRootWow = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\ASP.NET Core\Shared Framework'
+$allDiscoveredAspNetSharedFrameworks  = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-        # Skip if we've already added this exact component+version (e.g. x86 and x64 duplicates)
-        if ($AlreadyAddedEntries.ContainsKey($deduplicateKey)) { continue }
-
-        $AlreadyAddedEntries[$deduplicateKey] = $true
-        $AllDotNetInstalls.Add([PSCustomObject]@{
-            DisplayName      = $entry.DisplayName
-            ComponentType    = $componentType
-            Version          = $parsedVersion
-            MajorVersion     = [int]$versionNumberMatch.Groups[1].Value.Split('.')[0]
-            # Prefer the quiet uninstall string if available, otherwise use the regular one
-            UninstallCommand = if ($entry.QuietUninstallString) { $entry.QuietUninstallString } else { $entry.UninstallString }
-            RegistryKeyPath  = $entry.PSPath
+foreach ($aspNetRegistryRoot in @($aspNetSharedFrameworkRegistryRoot, $aspNetSharedFrameworkRegistryRootWow)) {
+    if (-not (Test-Path $aspNetRegistryRoot)) { continue }
+    Get-ChildItem $aspNetRegistryRoot -ErrorAction SilentlyContinue | ForEach-Object {
+        $aspNetVersionKey = $_
+        $aspNetVersionRegexMatch = [regex]::Match($aspNetVersionKey.PSChildName, $versionExtractionRegexPattern)
+        if (-not $aspNetVersionRegexMatch.Success) { return }
+        $parsedAspNetVersion = [version]$aspNetVersionRegexMatch.Groups[1].Value
+        $aspNetMajorVersion  = [int]$aspNetVersionRegexMatch.Groups[1].Value.Split('.')[0]
+        $aspNetDedupeKey     = "AspShared|$parsedAspNetVersion"
+        if ($deduplicationTracker.ContainsKey($aspNetDedupeKey)) { return }
+        $deduplicationTracker[$aspNetDedupeKey] = $true
+        $allDiscoveredAspNetSharedFrameworks.Add([PSCustomObject]@{
+            DisplayName        = "Microsoft ASP.NET Core $parsedAspNetVersion - Shared Framework"
+            ParsedVersion      = $parsedAspNetVersion
+            MajorVersionNumber = $aspNetMajorVersion
+            RegistryKeyPath    = $aspNetVersionKey.PSPath
         })
     }
 }
 
 
-# ---------------------------------------------------------------
-# Step 3 — Figure out which .NET 8 versions to keep.
-# We keep only the highest patch version of each component type.
-# ---------------------------------------------------------------
-$VersionsToKeep = @{}
-foreach ($componentType in @("Sdk", "Asp", "Desktop", "Runtime")) {
-    $highestVersion = ($AllDotNetInstalls |
-        Where-Object { $_.MajorVersion -eq $TargetDotNetVersion -and $_.ComponentType -eq $componentType } |
-        Sort-Object Version -Descending |
-        Select-Object -First 1).Version
-
-    if ($highestVersion) {
-        $VersionsToKeep[$componentType] = $highestVersion
+$latestPatchVersionPerSupportedMajorAndType = @{}
+$allDiscoveredDotNetProducts |
+    Where-Object { -not $explicitEolMajorVersions.Contains($_.MajorVersionNumber) } |
+    Group-Object -Property @{Expression = { "$($_.ComponentType)|$($_.MajorVersionNumber)" }} |
+    ForEach-Object {
+        $groupKey = $_.Name
+        $highestVersionInGroup = ($_.Group | Sort-Object ParsedVersion -Descending | Select-Object -First 1).ParsedVersion
+        $latestPatchVersionPerSupportedMajorAndType[$groupKey] = $highestVersionInGroup
     }
+
+$sdkVersionsInstalledByMajorMinorPatch = $allDiscoveredDotNetProducts |
+    Where-Object { $_.ComponentType -eq 'Sdk' } |
+    ForEach-Object { "$($_.MajorVersionNumber).$($_.ParsedVersion.Minor).$($_.ParsedVersion.Build)" } |
+    Sort-Object -Unique
+
+$finalProductsTargetedForRemoval = $allDiscoveredDotNetProducts | Where-Object {
+    $product = $_
+    $componentGroupKey = "$($product.ComponentType)|$($product.MajorVersionNumber)"
+    $isExplicitEolVersion = $explicitEolMajorVersions.Contains($product.MajorVersionNumber)
+    $isOutdatedPatchOfSupportedMajor = (
+        -not $isExplicitEolVersion -and
+        $latestPatchVersionPerSupportedMajorAndType.ContainsKey($componentGroupKey) -and
+        $product.ParsedVersion -lt $latestPatchVersionPerSupportedMajorAndType[$componentGroupKey]
+    )
+    $isRedundantHostingBundleCoveredBySdk = (
+        $product.ComponentType -eq 'HostingBundle' -and
+        -not $isExplicitEolVersion -and
+        $latestPatchVersionPerSupportedMajorAndType.ContainsKey($componentGroupKey) -and
+        $product.ParsedVersion -eq $latestPatchVersionPerSupportedMajorAndType[$componentGroupKey] -and
+        $sdkVersionsInstalledByMajorMinorPatch -contains "$($product.MajorVersionNumber).$($product.ParsedVersion.Minor).$($product.ParsedVersion.Build)"
+    )
+    $isExplicitEolVersion -or $isOutdatedPatchOfSupportedMajor -or $isRedundantHostingBundleCoveredBySdk
 }
 
-# Safety check — if .NET 8 isn't installed at all, don't remove everything.
-if ($VersionsToKeep.Count -eq 0) { Exit 1 }
-
-# Build the final list of things to remove:
-# - Anything that is NOT .NET 8 (e.g. .NET 6, .NET 7, .NET 9, etc.)
-# - Any .NET 8 patch that is older than the latest one we found
-$ComponentsToRemove = @(
-    $AllDotNetInstalls | Where-Object {
-        $type = $_.ComponentType
-        ($_.MajorVersion -ne $TargetDotNetVersion) -or
-        ($VersionsToKeep.ContainsKey($type) -and $_.Version -lt $VersionsToKeep[$type])
+$latestAspNetSharedFrameworkVersionPerMajor = @{}
+$allDiscoveredAspNetSharedFrameworks |
+    Where-Object { -not $explicitEolMajorVersions.Contains($_.MajorVersionNumber) } |
+    Group-Object -Property { $_.MajorVersionNumber } |
+    ForEach-Object {
+        $latestAspNetSharedFrameworkVersionPerMajor[$_.Name] = ($_.Group | Sort-Object ParsedVersion -Descending | Select-Object -First 1).ParsedVersion
     }
-)
 
-# Nothing to remove — machine is already clean
-if ($ComponentsToRemove.Count -eq 0) { Exit 0 }
-
-
-# ---------------------------------------------------------------
-# Step 4 — First removal pass using the official .NET Uninstall Tool.
-# This is the cleanest way to remove .NET components.
-# ---------------------------------------------------------------
-if ($UninstallToolExePath) {
-    foreach ($component in $ComponentsToRemove) {
-        $versionString = $component.Version.ToString()
-
-        $toolArguments = switch ($component.ComponentType) {
-            "Sdk"     { "remove $versionString --sdk --yes" }
-            "Asp"     { "remove $versionString --aspnet-runtime --yes" }
-            "Desktop" { "remove $versionString --windows-desktop-runtime --yes" }
-            "Runtime" { "remove $versionString --runtime --yes" }
-        }
-
-        if ($toolArguments) {
-            Run-SilentProcess -ExecutablePath $UninstallToolExePath -ProcessArguments $toolArguments | Out-Null
-        }
-    }
+$aspNetSharedFrameworksTargetedForRemoval = $allDiscoveredAspNetSharedFrameworks | Where-Object {
+    $explicitEolMajorVersions.Contains($_.MajorVersionNumber) -or
+    (
+        $latestAspNetSharedFrameworkVersionPerMajor.ContainsKey("$($_.MajorVersionNumber)") -and
+        $_.ParsedVersion -lt $latestAspNetSharedFrameworkVersionPerMajor["$($_.MajorVersionNumber)"]
+    )
 }
 
 
-# ---------------------------------------------------------------
-# Step 5 — Second removal pass using registry uninstall strings.
-# Catches anything the official tool missed.
-# ---------------------------------------------------------------
-foreach ($component in $ComponentsToRemove) {
-    # Check if it's still in the registry — skip if already removed
-    if (-not (Get-ItemProperty $component.RegistryKeyPath -ErrorAction SilentlyContinue)) { continue }
-    if ([string]::IsNullOrWhiteSpace($component.UninstallCommand)) { continue }
+if ((-not $finalProductsTargetedForRemoval -or @($finalProductsTargetedForRemoval).Count -eq 0) -and
+    (-not $aspNetSharedFrameworksTargetedForRemoval -or @($aspNetSharedFrameworksTargetedForRemoval).Count -eq 0)) {
+    Exit 0
+}
 
-    $uninstallCommand = $component.UninstallCommand
+$resolvedUninstallToolExePath = $null
+if (Test-Path $uninstallToolMsiFullPath) {
+    Invoke-SilentProcessWithTimeout -ExecutablePath $msiexecExecutable -ProcessArguments "/i `"$uninstallToolMsiFullPath`" /qn /norestart" | Out-Null
+    $resolvedUninstallToolExePath = $uninstallToolPossibleExePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
 
-    # Adjust the command to run silently
-    if ($uninstallCommand -match "msiexec") {
-        $uninstallCommand = $uninstallCommand -replace "/I", "/X"
-        if ($uninstallCommand -notmatch "/quiet") {
-            $uninstallCommand = "$uninstallCommand /quiet /norestart"
-        }
-    } elseif ($uninstallCommand -notmatch "(?i)/quiet|/silent") {
-        $uninstallCommand = "$uninstallCommand /quiet /norestart"
+if ($resolvedUninstallToolExePath) {
+    $dotNetToolComponentTypeToFlagMap = @{
+        'Sdk'           = '--sdk'
+        'Runtime'       = '--runtime'
+        'Host'          = '--runtime'
+        'Asp'           = '--aspnet-runtime'
+        'Desktop'       = '--windows-desktop-runtime'
+        'HostingBundle' = '--hosting-bundle'
     }
+    @($finalProductsTargetedForRemoval) | ForEach-Object {
+        $targetProduct = $_
+        $toolFlag = $dotNetToolComponentTypeToFlagMap[$targetProduct.ComponentType]
+        if ($toolFlag) {
+            $pass1ExitCode = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
+                -ProcessArguments "remove $($targetProduct.ParsedVersion.ToString()) $toolFlag --yes"
+        }
+    }
+}
 
-    # Split the command into the executable path and its arguments
-    $executableFile    = $null
-    $executableArgs    = ""
+if ($resolvedUninstallToolExePath -and @($aspNetSharedFrameworksTargetedForRemoval).Count -gt 0) {
+    @($aspNetSharedFrameworksTargetedForRemoval) | ForEach-Object {
+        $aspNetTarget = $_
+        $aspPass1ExitCode = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
+            -ProcessArguments "remove $($aspNetTarget.ParsedVersion.ToString()) --aspnet-runtime --yes"
+    }
+}
 
-    if ($uninstallCommand -match '^"(.*?)"\s*(.*)') {
-        $executableFile = $Matches[1]
-        $executableArgs = $Matches[2]
+@($aspNetSharedFrameworksTargetedForRemoval) | ForEach-Object {
+    $aspNetTarget = $_
+    if (-not (Test-Path $aspNetTarget.RegistryKeyPath -ErrorAction SilentlyContinue)) { return }
+    $aspNetFolderPath = "$dotNetSharedRuntimeFolder\Microsoft.AspNetCore.App\$($aspNetTarget.ParsedVersion.ToString())"
+    if (Test-Path $aspNetFolderPath) {
+        Remove-Item -Path $aspNetFolderPath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $aspNetFolderPath) { $script:globalUninstallFailureDetected = $true }
+    }
+    Remove-Item -Path $aspNetTarget.RegistryKeyPath -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+
+@($finalProductsTargetedForRemoval) | ForEach-Object {
+    $targetProduct = $_
+    if (-not (Get-ItemProperty $targetProduct.RegistryEntryPath -ErrorAction SilentlyContinue)) {
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($targetProduct.ResolvedUninstallString)) {
+        $script:globalUninstallFailureDetected = $true
+        return
+    }
+    $silentUninstallCommand = Get-SilentUninstallCommandFromRawString -RawUninstallString $targetProduct.ResolvedUninstallString
+    $parsedCommandParts = Split-CommandLineIntoExecutableAndArguments -FullCommandLine $silentUninstallCommand
+    $uninstallExitCode = Invoke-SilentProcessWithTimeout -ExecutablePath $parsedCommandParts[0] -ProcessArguments $parsedCommandParts[1]
+    if ($uninstallExitCode -notin @(0, 3010, 1605, 1614)) { $script:globalUninstallFailureDetected = $true }
+}
+
+@($finalProductsTargetedForRemoval) | Where-Object { Get-ItemProperty $_.RegistryEntryPath -ErrorAction SilentlyContinue } | ForEach-Object {
+    $targetProduct = $_
+    if ([string]::IsNullOrWhiteSpace($targetProduct.MsiProductCode)) {
+        $script:globalUninstallFailureDetected = $true
+        return
+    }
+    $wmiQueryResult = Get-CimInstance -ClassName Win32_Product -Filter "IdentifyingNumber='$($targetProduct.MsiProductCode)'" -ErrorAction SilentlyContinue
+    if ($wmiQueryResult) {
+        $cimUninstallResult = $wmiQueryResult | Invoke-CimMethod -MethodName Uninstall -ErrorAction SilentlyContinue
+        if (-not $cimUninstallResult -or $cimUninstallResult.ReturnValue -ne 0) { $script:globalUninstallFailureDetected = $true }
     } else {
-        $splitParts     = $uninstallCommand -split ' ', 2
-        $executableFile = $splitParts[0]
-        $executableArgs = if ($splitParts.Count -gt 1) { $splitParts[1] } else { "" }
-    }
-
-    if ($executableFile) {
-        Run-SilentProcess -ExecutablePath $executableFile -ProcessArguments $executableArgs | Out-Null
+        $script:globalUninstallFailureDetected = $true
     }
 }
 
 
-# ---------------------------------------------------------------
-# Step 6 — Delete leftover folders that the uninstallers didn't clean up.
-# Maps each folder path to the component type it belongs to.
-# ---------------------------------------------------------------
-$DotNetFolderToComponentMap = @{
-    "C:\Program Files\dotnet\sdk"                                 = "Sdk"
-    "C:\Program Files\dotnet\shared\Microsoft.NETCore.App"        = "Runtime"
-    "C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App" = "Desktop"
-    "C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App"     = "Asp"
-}
-
-foreach ($folderEntry in $DotNetFolderToComponentMap.GetEnumerator()) {
-    $folderPath    = $folderEntry.Key
-    $componentType = $folderEntry.Value
-
-    if (-not (Test-Path $folderPath)) { continue }
-
-    Get-ChildItem -Path $folderPath -Directory | ForEach-Object {
-        $subFolder       = $_
-        $versionInFolder = [regex]::Match($subFolder.Name, '(\d+\.\d+\.\d+)')
-        if (-not $versionInFolder.Success) { return }
-
-        $folderVersion     = [version]$versionInFolder.Groups[1].Value
-        $folderMajorNumber = [int]$versionInFolder.Groups[1].Value.Split('.')[0]
-
-        # Delete if it's not .NET 8, or if it's an older .NET 8 patch
-        $shouldDeleteFolder =
-            ($folderMajorNumber -ne $TargetDotNetVersion) -or
-            ($VersionsToKeep.ContainsKey($componentType) -and $folderVersion -lt $VersionsToKeep[$componentType])
-
-        if ($shouldDeleteFolder) {
-            Remove-Item -Path $subFolder.FullName -Recurse -Force -ErrorAction SilentlyContinue
+$dotNetFilesystemFolderToComponentTypeMap.GetEnumerator() | ForEach-Object {
+    $folderRootPath      = $_.Key
+    $folderComponentType = $_.Value
+    if (-not (Test-Path $folderRootPath)) { return }
+    Get-ChildItem -Path $folderRootPath -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        $subDirectoryItem = $_
+        $folderVersionRegexMatch = [regex]::Match($subDirectoryItem.Name, $versionExtractionRegexPattern)
+        if (-not $folderVersionRegexMatch.Success) { return }
+        $parsedFolderVersion     = [version]$folderVersionRegexMatch.Groups[1].Value
+        $folderMajorVersion      = [int]$folderVersionRegexMatch.Groups[1].Value.Split('.')[0]
+        $folderComponentGroupKey = "$folderComponentType|$folderMajorVersion"
+        $shouldDeleteThisFolder  = (
+            $explicitEolMajorVersions.Contains($folderMajorVersion) -or
+            (
+                $latestPatchVersionPerSupportedMajorAndType.ContainsKey($folderComponentGroupKey) -and
+                $parsedFolderVersion -lt $latestPatchVersionPerSupportedMajorAndType[$folderComponentGroupKey]
+            )
+        )
+        if ($shouldDeleteThisFolder) {
+            Remove-Item -Path $subDirectoryItem.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $subDirectoryItem.FullName) { $script:globalUninstallFailureDetected = $true }
         }
     }
 }
 
-
-# ---------------------------------------------------------------
-# Step 7 — Remove any leftover registry keys for components we removed.
-# These are "ghost" entries that appear installed but aren't really there.
-# ---------------------------------------------------------------
-foreach ($component in $ComponentsToRemove) {
-    if (Get-ItemProperty $component.RegistryKeyPath -ErrorAction SilentlyContinue) {
-        Remove-Item -Path $component.RegistryKeyPath -Recurse -Force -ErrorAction SilentlyContinue
+@($finalProductsTargetedForRemoval) | ForEach-Object {
+    if (Get-ItemProperty $_.RegistryEntryPath -ErrorAction SilentlyContinue) {
+        Remove-Item -Path $_.RegistryEntryPath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Get-ItemProperty $_.RegistryEntryPath -ErrorAction SilentlyContinue) { $script:globalUninstallFailureDetected = $true }
     }
 }
 
-
-# ---------------------------------------------------------------
-# Step 8 — Uninstall the .NET Uninstall Tool itself.
-# We look up its product GUID from the registry for a reliable removal.
-# ---------------------------------------------------------------
-if ($UninstallToolExePath) {
-    $uninstallToolProductGuid = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" `
-        -ErrorAction SilentlyContinue |
-        Where-Object { $_.DisplayName -match "dotnet-core-uninstall|\.NET Core Uninstall Tool" } |
+if ($resolvedUninstallToolExePath) {
+    $uninstallToolRegistryProductGuid = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -match 'dotnet-core-uninstall|\.NET Core Uninstall Tool' } |
         Select-Object -ExpandProperty PSChildName -First 1
-
-    if ($uninstallToolProductGuid -and $uninstallToolProductGuid -match '^\{.*\}$') {
-        # Clean removal using the product GUID — most reliable method
-        Start-Process msiexec.exe -ArgumentList "/x $uninstallToolProductGuid /qn /norestart" -Wait -NoNewWindow
-    } elseif (Test-Path $UninstallToolMsiPath) {
-        # Fall back to the MSI path if we couldn't find the GUID
-        Start-Process msiexec.exe -ArgumentList "/x `"$UninstallToolMsiPath`" /qn /norestart" -Wait -NoNewWindow
+    $msiRemovalArguments = if ($uninstallToolRegistryProductGuid -and $uninstallToolRegistryProductGuid -match '^\{.*\}$') {
+        "/x $uninstallToolRegistryProductGuid /qn /norestart"
+    } elseif (Test-Path $uninstallToolMsiFullPath) {
+        "/x `"$uninstallToolMsiFullPath`" /qn /norestart"
+    } else { $null }
+    if ($msiRemovalArguments) {
+        Invoke-SilentProcessWithTimeout -ExecutablePath $msiexecExecutable -ProcessArguments $msiRemovalArguments | Out-Null
     }
 }
 
-
-Exit 0
+if ($globalUninstallFailureDetected) { Exit 1 } else { Exit 0 }
