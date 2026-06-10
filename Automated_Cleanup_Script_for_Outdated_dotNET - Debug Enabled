@@ -1,0 +1,505 @@
+<#
+.Synopsis
+A PowerShell script designed for enterprise deployment (e.g., via SCCM) that silently discovers and forcefully uninstalls End-of-Life (EOL) .NET SDKs, Runtimes, and ASP.NET Shared Frameworks, as well as outdated patch versions of supported .NET major releases.
+
+.Description
+This script automates the tedious process of cleaning up outdated Microsoft .NET environments on Windows machines. It operates through a multi-pass approach to ensure thorough removal:
+Discovery: It scans system and user registry hives (HKLM and HKU) to inventory all installed .NET SDKs, Desktop Runtimes, Hosting Bundles, and ASP.NET Core Shared Frameworks.
+Targeting: It calculates which versions to remove based on an explicit EOL list and automatically flags older patch versions of currently supported major releases for removal.
+Execution (Pass 1 - Official Tool): If provided alongside the script, it temporarily installs the official dotnet-core-uninstall.msi tool to handle the bulk of the uninstalls safely.
+Execution (Pass 2 & 3 - Fallbacks): For components the official tool misses or if the tool isn't available, it falls back to native uninstall strings (msiexec), direct folder deletion (for ASP.NET Shared Frameworks), and WMI/CIM invocation for "ghost" MSI entries.
+Deep Clean: It sweeps the C:\Program Files\dotnet directory and registry for leftover orphaned folders and keys, removing them forcefully.
+Reporting: It tracks failures globally and exits with 0 for complete success or 1 if any uninstall operation failed, allowing deployment tools like SCCM to queue retries. It also features extensive debug logging regions that log to the TEMP directory.
+
+.Notes
+Permissions: The script contains a hard stop at the beginning; it will immediately Exit 1 if not run with local Administrator privileges.
+Production Readiness: The script includes several #region DEBUG_PROGRESS blocks. As noted in the comments, these are intended to be stripped out prior to a silent, mass-production SCCM deployment to prevent unnecessary console output and file I/O operations.
+Dependencies: For optimal performance, the official Microsoft dotnet-core-uninstall.msi file should be placed in the exact same directory as this script. The script will automatically install it, use it, and cleanly uninstall it at the end.
+Safety: It uses an intelligent deduplication tracker and determines the highest installed patch version for supported releases, ensuring it doesn't accidentally break active development environments by uninstalling required, up-to-date SDKs.
+
+.Variable to Change (For Future EOL Versions)
+To update the script when a currently supported version of .NET (e.g., .NET 8) reaches its End-of-Life, you only need to modify the following variable located near the top of the script (around line 20):
+
+$explicitEolMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
+
+How to update it:
+Simply add the new major version integer to the comma-separated list inside the parentheses. For example, when .NET 8 reaches EOL, change it to:
+$explicitEolMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3,
+#>
+
+$ErrorActionPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+$debugLogFilePath = "$env:TEMP\DotNet-Cleanup-Debug.log"
+function Write-DebugStage {
+    param([string]$StageLabel, [int]$StageNumber, [int]$TotalStages, [string]$Color = 'Cyan')
+    $debugTimestamp        = Get-Date -Format 'HH:mm:ss'
+    $debugProgressBar      = ('#' * $StageNumber).PadRight($TotalStages, '-')
+    $debugPercent          = [int](($StageNumber / $TotalStages) * 100)
+    $debugConsoleLine      = "[$debugTimestamp]  [$debugProgressBar]  $debugPercent%  |  Stage $StageNumber/$TotalStages  -  $StageLabel"
+    Write-Host $debugConsoleLine -ForegroundColor $Color
+    Add-Content -Path $script:debugLogFilePath -Value $debugConsoleLine -Encoding UTF8
+}
+$debugTotalStages = 8
+Add-Content -Path $debugLogFilePath -Value ("=" * 80) -Encoding UTF8
+Add-Content -Path $debugLogFilePath -Value "  .NET CLEANUP DEBUG LOG  |  Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  |  Host: $env:COMPUTERNAME" -Encoding UTF8
+Add-Content -Path $debugLogFilePath -Value ("=" * 80) -Encoding UTF8
+Write-Host ""
+Write-Host "  *** DEBUG MODE - .NET Cleanup Script ***" -ForegroundColor Yellow
+Write-Host "  Log file -> $debugLogFilePath" -ForegroundColor DarkYellow
+Write-Host ""
+Write-DebugStage -StageLabel 'Admin check & variable init' -StageNumber 0 -TotalStages $debugTotalStages
+#endregion DEBUG_PROGRESS
+
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Exit 1 }
+
+$explicitEolMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
+$dotNetFrameworkExclusionPattern    = '\.NET Framework'
+$dotNetProductDisplayNamePattern    = '^Microsoft (\.NET|ASP\.NET Core)|^\.NET Core|^dotnet-'
+$dotNetSdkNamePattern               = 'SDK|dotnet-sdk'
+$dotNetAspNetNamePattern            = 'ASP\.NET Core|dotnet-aspnetcore'
+$dotNetHostingBundleNamePattern     = 'Hosting Bundle|Windows Server Hosting|dotnet-hosting'
+$dotNetDesktopRuntimeNamePattern    = 'Windows Desktop Runtime'
+$dotNetCoreRuntimeNamePattern       = 'Runtime|dotnet-runtime'
+$dotNetHostNamePattern              = 'Host FX Resolver|Host -|dotnet-host-'
+$versionExtractionRegexPattern      = '(\d+\.\d+\.\d+)'
+$msiexecExecutable                  = 'msiexec.exe'
+$uninstallToolMsiFileName           = 'dotnet-core-uninstall.msi'
+$uninstallToolMsiFullPath           = Join-Path $PSScriptRoot $uninstallToolMsiFileName
+$uninstallToolPossibleExePaths      = @(
+    "${env:ProgramFiles(x86)}\dotnet-core-uninstall\dotnet-core-uninstall.exe",
+    "${env:ProgramFiles}\dotnet-core-uninstall\dotnet-core-uninstall.exe"
+)
+$dotNetInstallRootFolder            = 'C:\Program Files\dotnet'
+$dotNetSdkSubFolder                 = "$dotNetInstallRootFolder\sdk"
+$dotNetSharedRuntimeFolder          = "$dotNetInstallRootFolder\shared"
+
+$globalUninstallFailureDetected = $false
+
+$dotNetFilesystemFolderToComponentTypeMap = [ordered]@{
+    $dotNetSdkSubFolder                                                   = 'Sdk'
+    "$dotNetSharedRuntimeFolder\Microsoft.NETCore.App"                    = 'Runtime'
+    "$dotNetSharedRuntimeFolder\Microsoft.WindowsDesktop.App"             = 'Desktop'
+    "$dotNetSharedRuntimeFolder\Microsoft.AspNetCore.App"                 = 'Asp'
+}
+
+function Invoke-SilentProcessWithTimeout {
+    param([string]$ExecutablePath, [string]$ProcessArguments, [int]$TimeoutMilliseconds = 120000)
+    try {
+        $processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processStartInfo.FileName = $ExecutablePath
+        $processStartInfo.Arguments = $ProcessArguments
+        $processStartInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+        $processStartInfo.CreateNoWindow = $true
+        $launchedProcess = [System.Diagnostics.Process]::Start($processStartInfo)
+        if (-not $launchedProcess.WaitForExit($TimeoutMilliseconds)) { $launchedProcess.Kill(); return -1 }
+        return $launchedProcess.ExitCode
+    } catch { return -1 }
+}
+
+function Get-DotNetComponentTypeFromDisplayName {
+    param([string]$ProductDisplayName)
+    if ($ProductDisplayName -match $dotNetSdkNamePattern) { return 'Sdk' }
+    elseif ($ProductDisplayName -match $dotNetHostingBundleNamePattern) { return 'HostingBundle' }
+    elseif ($ProductDisplayName -match $dotNetAspNetNamePattern) { return 'Asp' }
+    elseif ($ProductDisplayName -match $dotNetDesktopRuntimeNamePattern) { return 'Desktop' }
+    elseif ($ProductDisplayName -match $dotNetHostNamePattern) { return 'Host' }
+    elseif ($ProductDisplayName -match $dotNetCoreRuntimeNamePattern) { return 'Runtime' }
+    return 'Unknown'
+}
+
+function Get-SilentUninstallCommandFromRawString {
+    param([string]$RawUninstallString)
+    $adjustedCommand = $RawUninstallString
+    if ($adjustedCommand -match $msiexecExecutable) {
+        $adjustedCommand = $adjustedCommand -replace '/I', '/X'
+        if ($adjustedCommand -notmatch '/quiet') { $adjustedCommand = "$adjustedCommand /quiet /norestart" }
+    } elseif ($adjustedCommand -notmatch '(?i)/quiet|/silent') {
+        $adjustedCommand = "$adjustedCommand /quiet /norestart"
+    }
+    return $adjustedCommand
+}
+
+function Split-CommandLineIntoExecutableAndArguments {
+    param([string]$FullCommandLine)
+    if ($FullCommandLine -match '^"(.*?)"\s*(.*)') { return @($Matches[1], $Matches[2]) }
+    $splitResult = $FullCommandLine -split ' ', 2
+    return @($splitResult[0], $(if ($splitResult.Count -gt 1) { $splitResult[1] } else { '' }))
+}
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+Write-DebugStage -StageLabel 'Scanning registry - HKLM + HKU user hives' -StageNumber 1 -TotalStages $debugTotalStages
+#endregion DEBUG_PROGRESS
+
+$allRegistrySearchLocations = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+)
+
+if (-not (Get-PSDrive -Name HKU -ErrorAction SilentlyContinue)) {
+    New-PSDrive -Name HKU -PSProvider Registry -Root HKEY_USERS | Out-Null
+}
+Get-ChildItem 'HKU:\' -ErrorAction SilentlyContinue | ForEach-Object {
+    $perUserUninstallPath = "HKU:\$($_.PSChildName)\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    if (Test-Path "HKU:\$($_.PSChildName)\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall") {
+        $allRegistrySearchLocations += $perUserUninstallPath
+    }
+}
+
+$deduplicationTracker = @{}
+$allDiscoveredDotNetProducts = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+foreach ($registrySearchPath in $allRegistrySearchLocations) {
+    Get-ItemProperty $registrySearchPath -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -match $dotNetProductDisplayNamePattern -and $_.DisplayName -notmatch $dotNetFrameworkExclusionPattern } |
+    ForEach-Object {
+        $currentEntry = $_
+        $versionRegexMatch = [regex]::Match($currentEntry.DisplayName, $versionExtractionRegexPattern)
+        if (-not $versionRegexMatch.Success) { return }
+        $parsedProductVersion = [version]$versionRegexMatch.Groups[1].Value
+        $detectedComponentType = Get-DotNetComponentTypeFromDisplayName -ProductDisplayName $currentEntry.DisplayName
+        if ($detectedComponentType -eq 'Unknown') { return }
+        $deduplicationKey = "$detectedComponentType|$parsedProductVersion"
+        if ($deduplicationTracker.ContainsKey($deduplicationKey)) { return }
+        $deduplicationTracker[$deduplicationKey] = $true
+        $resolvedUninstallString = if ($currentEntry.QuietUninstallString) { $currentEntry.QuietUninstallString } else { $currentEntry.UninstallString }
+        $allDiscoveredDotNetProducts.Add([PSCustomObject]@{
+            DisplayName             = $currentEntry.DisplayName
+            ComponentType           = $detectedComponentType
+            ParsedVersion           = $parsedProductVersion
+            MajorVersionNumber      = [int]$versionRegexMatch.Groups[1].Value.Split('.')[0]
+            ResolvedUninstallString = $resolvedUninstallString
+            RegistryEntryPath       = $currentEntry.PSPath
+            MsiProductCode          = if ($currentEntry.PSChildName -match '^\{.*\}$') { $currentEntry.PSChildName } else { $null }
+        })
+    }
+}
+
+$aspNetSharedFrameworkRegistryRoot    = 'HKLM:\SOFTWARE\Microsoft\ASP.NET Core\Shared Framework'
+$aspNetSharedFrameworkRegistryRootWow = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\ASP.NET Core\Shared Framework'
+$allDiscoveredAspNetSharedFrameworks  = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+foreach ($aspNetRegistryRoot in @($aspNetSharedFrameworkRegistryRoot, $aspNetSharedFrameworkRegistryRootWow)) {
+    if (-not (Test-Path $aspNetRegistryRoot)) { continue }
+    Get-ChildItem $aspNetRegistryRoot -ErrorAction SilentlyContinue | ForEach-Object {
+        $aspNetVersionKey = $_
+        $aspNetVersionRegexMatch = [regex]::Match($aspNetVersionKey.PSChildName, $versionExtractionRegexPattern)
+        if (-not $aspNetVersionRegexMatch.Success) { return }
+        $parsedAspNetVersion = [version]$aspNetVersionRegexMatch.Groups[1].Value
+        $aspNetMajorVersion  = [int]$aspNetVersionRegexMatch.Groups[1].Value.Split('.')[0]
+        $aspNetDedupeKey     = "AspShared|$parsedAspNetVersion"
+        if ($deduplicationTracker.ContainsKey($aspNetDedupeKey)) { return }
+        $deduplicationTracker[$aspNetDedupeKey] = $true
+        $allDiscoveredAspNetSharedFrameworks.Add([PSCustomObject]@{
+            DisplayName        = "Microsoft ASP.NET Core $parsedAspNetVersion - Shared Framework"
+            ParsedVersion      = $parsedAspNetVersion
+            MajorVersionNumber = $aspNetMajorVersion
+            RegistryKeyPath    = $aspNetVersionKey.PSPath
+        })
+    }
+}
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+Write-DebugStage -StageLabel "Registry scan complete - $($allDiscoveredDotNetProducts.Count) .NET product(s) discovered" -StageNumber 2 -TotalStages $debugTotalStages
+Write-Host ""
+Write-Host "  DISCOVERED .NET PRODUCTS:" -ForegroundColor DarkCyan
+$allDiscoveredDotNetProducts | ForEach-Object {
+    $debugProductLine = "    [FOUND]  $($_.ComponentType.PadRight(14)) v$($_.ParsedVersion)  |  Major: $($_.MajorVersionNumber)  |  $($_.DisplayName)"
+    Write-Host $debugProductLine -ForegroundColor DarkGray
+    Add-Content -Path $debugLogFilePath -Value $debugProductLine -Encoding UTF8
+}
+$allDiscoveredAspNetSharedFrameworks | ForEach-Object {
+    $debugAspLine = "    [FOUND]  AspShared      v$($_.ParsedVersion)  |  Major: $($_.MajorVersionNumber)  |  $($_.DisplayName)"
+    Write-Host $debugAspLine -ForegroundColor DarkGray
+    Add-Content -Path $debugLogFilePath -Value $debugAspLine -Encoding UTF8
+}
+Write-Host ""
+#endregion DEBUG_PROGRESS
+
+$latestPatchVersionPerSupportedMajorAndType = @{}
+$allDiscoveredDotNetProducts |
+    Where-Object { -not $explicitEolMajorVersions.Contains($_.MajorVersionNumber) } |
+    Group-Object -Property @{Expression = { "$($_.ComponentType)|$($_.MajorVersionNumber)" }} |
+    ForEach-Object {
+        $groupKey = $_.Name
+        $highestVersionInGroup = ($_.Group | Sort-Object ParsedVersion -Descending | Select-Object -First 1).ParsedVersion
+        $latestPatchVersionPerSupportedMajorAndType[$groupKey] = $highestVersionInGroup
+    }
+
+$sdkVersionsInstalledByMajorMinorPatch = $allDiscoveredDotNetProducts |
+    Where-Object { $_.ComponentType -eq 'Sdk' } |
+    ForEach-Object { "$($_.MajorVersionNumber).$($_.ParsedVersion.Minor).$($_.ParsedVersion.Build)" } |
+    Sort-Object -Unique
+
+$finalProductsTargetedForRemoval = $allDiscoveredDotNetProducts | Where-Object {
+    $product = $_
+    $componentGroupKey = "$($product.ComponentType)|$($product.MajorVersionNumber)"
+    $isExplicitEolVersion = $explicitEolMajorVersions.Contains($product.MajorVersionNumber)
+    $isOutdatedPatchOfSupportedMajor = (
+        -not $isExplicitEolVersion -and
+        $latestPatchVersionPerSupportedMajorAndType.ContainsKey($componentGroupKey) -and
+        $product.ParsedVersion -lt $latestPatchVersionPerSupportedMajorAndType[$componentGroupKey]
+    )
+    $isRedundantHostingBundleCoveredBySdk = (
+        $product.ComponentType -eq 'HostingBundle' -and
+        -not $isExplicitEolVersion -and
+        $latestPatchVersionPerSupportedMajorAndType.ContainsKey($componentGroupKey) -and
+        $product.ParsedVersion -eq $latestPatchVersionPerSupportedMajorAndType[$componentGroupKey] -and
+        $sdkVersionsInstalledByMajorMinorPatch -contains "$($product.MajorVersionNumber).$($product.ParsedVersion.Minor).$($product.ParsedVersion.Build)"
+    )
+    $isExplicitEolVersion -or $isOutdatedPatchOfSupportedMajor -or $isRedundantHostingBundleCoveredBySdk
+}
+
+$latestAspNetSharedFrameworkVersionPerMajor = @{}
+$allDiscoveredAspNetSharedFrameworks |
+    Where-Object { -not $explicitEolMajorVersions.Contains($_.MajorVersionNumber) } |
+    Group-Object -Property { $_.MajorVersionNumber } |
+    ForEach-Object {
+        $latestAspNetSharedFrameworkVersionPerMajor[$_.Name] = ($_.Group | Sort-Object ParsedVersion -Descending | Select-Object -First 1).ParsedVersion
+    }
+
+$aspNetSharedFrameworksTargetedForRemoval = $allDiscoveredAspNetSharedFrameworks | Where-Object {
+    $explicitEolMajorVersions.Contains($_.MajorVersionNumber) -or
+    (
+        $latestAspNetSharedFrameworkVersionPerMajor.ContainsKey("$($_.MajorVersionNumber)") -and
+        $_.ParsedVersion -lt $latestAspNetSharedFrameworkVersionPerMajor["$($_.MajorVersionNumber)"]
+    )
+}
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+$debugTargetCount = @($finalProductsTargetedForRemoval).Count + @($aspNetSharedFrameworksTargetedForRemoval).Count
+Write-DebugStage -StageLabel "Removal targets resolved - $debugTargetCount component(s) queued for removal" -StageNumber 3 -TotalStages $debugTotalStages -Color Magenta
+Write-Host ""
+Write-Host "  COMPONENTS QUEUED FOR REMOVAL:" -ForegroundColor DarkMagenta
+@($finalProductsTargetedForRemoval) | ForEach-Object {
+    $debugTargetLine = "    [TARGET] $($_.ComponentType.PadRight(14)) v$($_.ParsedVersion)  |  Major: $($_.MajorVersionNumber)  |  $($_.DisplayName)"
+    Write-Host $debugTargetLine -ForegroundColor Red
+    Add-Content -Path $debugLogFilePath -Value $debugTargetLine -Encoding UTF8
+}
+@($aspNetSharedFrameworksTargetedForRemoval) | ForEach-Object {
+    $debugAspTargetLine = "    [TARGET] AspShared      v$($_.ParsedVersion)  |  Major: $($_.MajorVersionNumber)  |  $($_.DisplayName)"
+    Write-Host $debugAspTargetLine -ForegroundColor Red
+    Add-Content -Path $debugLogFilePath -Value $debugAspTargetLine -Encoding UTF8
+}
+Write-Host ""
+#endregion DEBUG_PROGRESS
+
+if ((-not $finalProductsTargetedForRemoval -or @($finalProductsTargetedForRemoval).Count -eq 0) -and
+    (-not $aspNetSharedFrameworksTargetedForRemoval -or @($aspNetSharedFrameworksTargetedForRemoval).Count -eq 0)) {
+    #region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+    $debugCleanMsg = "  [RESULT]  Nothing to remove - machine is already clean.  Exit 0."
+    Write-Host $debugCleanMsg -ForegroundColor Green
+    Add-Content -Path $debugLogFilePath -Value $debugCleanMsg -Encoding UTF8
+    Write-Host ""
+    #endregion DEBUG_PROGRESS
+    Exit 0
+}
+
+$resolvedUninstallToolExePath = $null
+if (Test-Path $uninstallToolMsiFullPath) {
+    Invoke-SilentProcessWithTimeout -ExecutablePath $msiexecExecutable -ProcessArguments "/i `"$uninstallToolMsiFullPath`" /qn /norestart" | Out-Null
+    $resolvedUninstallToolExePath = $uninstallToolPossibleExePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+$debugToolStatus = if ($resolvedUninstallToolExePath) { 'Tool FOUND & ready' } else { 'Tool NOT found - registry fallback only' }
+$debugToolColor  = if ($resolvedUninstallToolExePath) { 'Cyan' } else { 'DarkYellow' }
+Write-DebugStage -StageLabel "Pass 1 - Official .NET Uninstall Tool  ($debugToolStatus)" -StageNumber 4 -TotalStages $debugTotalStages -Color $debugToolColor
+#endregion DEBUG_PROGRESS
+
+if ($resolvedUninstallToolExePath) {
+    $dotNetToolComponentTypeToFlagMap = @{
+        'Sdk'           = '--sdk'
+        'Runtime'       = '--runtime'
+        'Host'          = '--runtime'
+        'Asp'           = '--aspnet-runtime'
+        'Desktop'       = '--windows-desktop-runtime'
+        'HostingBundle' = '--hosting-bundle'
+    }
+    @($finalProductsTargetedForRemoval) | ForEach-Object {
+        $targetProduct = $_
+        $toolFlag = $dotNetToolComponentTypeToFlagMap[$targetProduct.ComponentType]
+        if ($toolFlag) {
+            $pass1ExitCode = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
+                -ProcessArguments "remove $($targetProduct.ParsedVersion.ToString()) $toolFlag --yes"
+            #region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+            $debugPass1Line  = "    [PASS1]  $($targetProduct.DisplayName)  |  ExitCode: $pass1ExitCode"
+            $debugPass1Color = if ($pass1ExitCode -in @(0, 3010, 1605, 1614)) { 'Green' } else { 'DarkYellow' }
+            Write-Host $debugPass1Line -ForegroundColor $debugPass1Color
+            Add-Content -Path $debugLogFilePath -Value $debugPass1Line -Encoding UTF8
+            #endregion DEBUG_PROGRESS
+        } else {
+            #region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+            $debugSkipLine = "    [PASS1]  SKIPPED (no tool flag mapped) - $($targetProduct.DisplayName)  |  Type: $($targetProduct.ComponentType)"
+            Write-Host $debugSkipLine -ForegroundColor DarkYellow
+            Add-Content -Path $debugLogFilePath -Value $debugSkipLine -Encoding UTF8
+            #endregion DEBUG_PROGRESS
+        }
+    }
+}
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+Write-DebugStage -StageLabel 'Pass 2 - ASP.NET Core Shared Framework direct removal' -StageNumber 5 -TotalStages $debugTotalStages
+#endregion DEBUG_PROGRESS
+
+if ($resolvedUninstallToolExePath -and @($aspNetSharedFrameworksTargetedForRemoval).Count -gt 0) {
+    @($aspNetSharedFrameworksTargetedForRemoval) | ForEach-Object {
+        $aspNetTarget = $_
+        $aspPass1ExitCode = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
+            -ProcessArguments "remove $($aspNetTarget.ParsedVersion.ToString()) --aspnet-runtime --yes"
+        #region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+        $debugAspPass1Color = if ($aspPass1ExitCode -in @(0, 3010, 1605, 1614)) { 'Green' } else { 'DarkYellow' }
+        $debugAspPass1Line  = "    [ASP1]   $($aspNetTarget.DisplayName)  |  ExitCode: $aspPass1ExitCode"
+        Write-Host $debugAspPass1Line -ForegroundColor $debugAspPass1Color
+        Add-Content -Path $debugLogFilePath -Value $debugAspPass1Line -Encoding UTF8
+        #endregion DEBUG_PROGRESS
+    }
+}
+
+@($aspNetSharedFrameworksTargetedForRemoval) | ForEach-Object {
+    $aspNetTarget = $_
+    if (-not (Test-Path $aspNetTarget.RegistryKeyPath -ErrorAction SilentlyContinue)) { return }
+    $aspNetFolderPath = "$dotNetSharedRuntimeFolder\Microsoft.AspNetCore.App\$($aspNetTarget.ParsedVersion.ToString())"
+    if (Test-Path $aspNetFolderPath) {
+        Remove-Item -Path $aspNetFolderPath -Recurse -Force -ErrorAction SilentlyContinue
+        #region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+        $debugAspFolderColor = if (-not (Test-Path $aspNetFolderPath)) { 'Green' } else { 'Red' }
+        $debugAspFolderLine  = "    [ASP2]   Folder removal - $aspNetFolderPath  |  $(if (-not (Test-Path $aspNetFolderPath)) { 'Deleted' } else { 'STILL EXISTS' })"
+        Write-Host $debugAspFolderLine -ForegroundColor $debugAspFolderColor
+        Add-Content -Path $debugLogFilePath -Value $debugAspFolderLine -Encoding UTF8
+        #endregion DEBUG_PROGRESS
+        if (Test-Path $aspNetFolderPath) { $script:globalUninstallFailureDetected = $true }
+    }
+    Remove-Item -Path $aspNetTarget.RegistryKeyPath -Recurse -Force -ErrorAction SilentlyContinue
+    #region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+    $debugAspRegColor = if (-not (Test-Path $aspNetTarget.RegistryKeyPath -ErrorAction SilentlyContinue)) { 'Green' } else { 'Red' }
+    $debugAspRegLine  = "    [ASP2]   Registry removal - $($aspNetTarget.DisplayName)  |  $(if (-not (Test-Path $aspNetTarget.RegistryKeyPath -ErrorAction SilentlyContinue)) { 'Deleted' } else { 'STILL EXISTS' })"
+    Write-Host $debugAspRegLine -ForegroundColor $debugAspRegColor
+    Add-Content -Path $debugLogFilePath -Value $debugAspRegLine -Encoding UTF8
+    #endregion DEBUG_PROGRESS
+}
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+Write-DebugStage -StageLabel 'Pass 3 - Registry uninstall strings (HKLM + HKU)' -StageNumber 5 -TotalStages $debugTotalStages
+#endregion DEBUG_PROGRESS
+
+@($finalProductsTargetedForRemoval) | ForEach-Object {
+    $targetProduct = $_
+    if (-not (Get-ItemProperty $targetProduct.RegistryEntryPath -ErrorAction SilentlyContinue)) {
+        #region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+        $debugAlreadyGoneLine = "    [PASS2]  Already removed (no registry entry) - $($targetProduct.DisplayName)"
+        Write-Host $debugAlreadyGoneLine -ForegroundColor Green
+        Add-Content -Path $debugLogFilePath -Value $debugAlreadyGoneLine -Encoding UTF8
+        #endregion DEBUG_PROGRESS
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($targetProduct.ResolvedUninstallString)) {
+        $script:globalUninstallFailureDetected = $true
+        #region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+        $debugNoStringLine = "    [PASS2]  FAILED - No uninstall string found - $($targetProduct.DisplayName)"
+        Write-Host $debugNoStringLine -ForegroundColor Red
+        Add-Content -Path $debugLogFilePath -Value $debugNoStringLine -Encoding UTF8
+        #endregion DEBUG_PROGRESS
+        return
+    }
+    $silentUninstallCommand = Get-SilentUninstallCommandFromRawString -RawUninstallString $targetProduct.ResolvedUninstallString
+    $parsedCommandParts = Split-CommandLineIntoExecutableAndArguments -FullCommandLine $silentUninstallCommand
+    $uninstallExitCode = Invoke-SilentProcessWithTimeout -ExecutablePath $parsedCommandParts[0] -ProcessArguments $parsedCommandParts[1]
+    #region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+    $debugPass2Color = if ($uninstallExitCode -in @(0, 3010, 1605, 1614)) { 'Green' } else { 'Red' }
+    $debugPass2Line  = "    [PASS2]  $($targetProduct.DisplayName)  |  ExitCode: $uninstallExitCode  |  Cmd: $silentUninstallCommand"
+    Write-Host $debugPass2Line -ForegroundColor $debugPass2Color
+    Add-Content -Path $debugLogFilePath -Value $debugPass2Line -Encoding UTF8
+    #endregion DEBUG_PROGRESS
+    if ($uninstallExitCode -notin @(0, 3010, 1605, 1614)) { $script:globalUninstallFailureDetected = $true }
+}
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+Write-DebugStage -StageLabel 'Pass 4 - WMI/CIM fallback for ghost MSI entries' -StageNumber 6 -TotalStages $debugTotalStages
+#endregion DEBUG_PROGRESS
+
+@($finalProductsTargetedForRemoval) | Where-Object { Get-ItemProperty $_.RegistryEntryPath -ErrorAction SilentlyContinue } | ForEach-Object {
+    $targetProduct = $_
+    if ([string]::IsNullOrWhiteSpace($targetProduct.MsiProductCode)) {
+        $script:globalUninstallFailureDetected = $true
+        return
+    }
+    $wmiQueryResult = Get-CimInstance -ClassName Win32_Product -Filter "IdentifyingNumber='$($targetProduct.MsiProductCode)'" -ErrorAction SilentlyContinue
+    if ($wmiQueryResult) {
+        $cimUninstallResult = $wmiQueryResult | Invoke-CimMethod -MethodName Uninstall -ErrorAction SilentlyContinue
+        if (-not $cimUninstallResult -or $cimUninstallResult.ReturnValue -ne 0) { $script:globalUninstallFailureDetected = $true }
+    } else {
+        $script:globalUninstallFailureDetected = $true
+    }
+}
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+Write-DebugStage -StageLabel 'Deep clean - leftover filesystem folders & ghost registry keys' -StageNumber 7 -TotalStages $debugTotalStages
+#endregion DEBUG_PROGRESS
+
+$dotNetFilesystemFolderToComponentTypeMap.GetEnumerator() | ForEach-Object {
+    $folderRootPath      = $_.Key
+    $folderComponentType = $_.Value
+    if (-not (Test-Path $folderRootPath)) { return }
+    Get-ChildItem -Path $folderRootPath -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        $subDirectoryItem = $_
+        $folderVersionRegexMatch = [regex]::Match($subDirectoryItem.Name, $versionExtractionRegexPattern)
+        if (-not $folderVersionRegexMatch.Success) { return }
+        $parsedFolderVersion     = [version]$folderVersionRegexMatch.Groups[1].Value
+        $folderMajorVersion      = [int]$folderVersionRegexMatch.Groups[1].Value.Split('.')[0]
+        $folderComponentGroupKey = "$folderComponentType|$folderMajorVersion"
+        $shouldDeleteThisFolder  = (
+            $explicitEolMajorVersions.Contains($folderMajorVersion) -or
+            (
+                $latestPatchVersionPerSupportedMajorAndType.ContainsKey($folderComponentGroupKey) -and
+                $parsedFolderVersion -lt $latestPatchVersionPerSupportedMajorAndType[$folderComponentGroupKey]
+            )
+        )
+        if ($shouldDeleteThisFolder) {
+            Remove-Item -Path $subDirectoryItem.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $subDirectoryItem.FullName) { $script:globalUninstallFailureDetected = $true }
+        }
+    }
+}
+
+@($finalProductsTargetedForRemoval) | ForEach-Object {
+    if (Get-ItemProperty $_.RegistryEntryPath -ErrorAction SilentlyContinue) {
+        Remove-Item -Path $_.RegistryEntryPath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Get-ItemProperty $_.RegistryEntryPath -ErrorAction SilentlyContinue) { $script:globalUninstallFailureDetected = $true }
+    }
+}
+
+if ($resolvedUninstallToolExePath) {
+    $uninstallToolRegistryProductGuid = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -match 'dotnet-core-uninstall|\.NET Core Uninstall Tool' } |
+        Select-Object -ExpandProperty PSChildName -First 1
+    $msiRemovalArguments = if ($uninstallToolRegistryProductGuid -and $uninstallToolRegistryProductGuid -match '^\{.*\}$') {
+        "/x $uninstallToolRegistryProductGuid /qn /norestart"
+    } elseif (Test-Path $uninstallToolMsiFullPath) {
+        "/x `"$uninstallToolMsiFullPath`" /qn /norestart"
+    } else { $null }
+    if ($msiRemovalArguments) {
+        Invoke-SilentProcessWithTimeout -ExecutablePath $msiexecExecutable -ProcessArguments $msiRemovalArguments | Out-Null
+    }
+}
+
+#region DEBUG_PROGRESS - REMOVE ENTIRE REGION BEFORE PRODUCTION SCCM DEPLOYMENT
+$debugFinalStatus = if ($globalUninstallFailureDetected) { 'COMPLETED WITH FAILURES - Exit 1  (SCCM will retry)' } else { 'COMPLETED SUCCESSFULLY - Exit 0' }
+$debugFinalColor  = if ($globalUninstallFailureDetected) { 'Red' } else { 'Green' }
+Write-DebugStage -StageLabel $debugFinalStatus -StageNumber 8 -TotalStages $debugTotalStages -Color $debugFinalColor
+Add-Content -Path $debugLogFilePath -Value ("=" * 80) -Encoding UTF8
+Add-Content -Path $debugLogFilePath -Value "  Finished: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  |  $debugFinalStatus" -Encoding UTF8
+Add-Content -Path $debugLogFilePath -Value ("=" * 80) -Encoding UTF8
+Write-Host ""
+Write-Host "  Log saved -> $debugLogFilePath" -ForegroundColor DarkYellow
+Write-Host ""
+#endregion DEBUG_PROGRESS
+
+if ($globalUninstallFailureDetected) { Exit 1 } else { Exit 0 }
+
+
+
+
