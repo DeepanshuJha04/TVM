@@ -1,0 +1,380 @@
+--- Modern .NET (Core / 5+) Runtimes ---
+Microsoft.AspNetCore.All 2.1.30 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.All]
+Microsoft.AspNetCore.All 2.2.8 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.All]
+Microsoft.AspNetCore.App 2.1.30 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 2.2.8 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 3.0.3 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 3.1.32 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 5.0.17 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 6.0.36 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 7.0.20 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 8.0.28 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 9.0.12 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 9.0.17 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 10.0.6 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 10.0.9 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 11.0.0-preview.3.26207.106 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.NETCore.App 1.0.12 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 1.0.16 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 1.1.8 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 1.1.13 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 2.0.6 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 2.0.9 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 2.1.26 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 2.1.30 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 2.2.8 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 3.0.3 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 3.1.32 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 5.0.17 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 6.0.36 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 7.0.20 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 8.0.28 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 9.0.12 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 9.0.17 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.6 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.9 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 11.0.0-preview.3.26207.106 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 11.0.0-preview.5.26302.115 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.WindowsDesktop.App 3.0.3 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 3.1.32 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 5.0.17 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 6.0.36 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 7.0.20 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 8.0.28 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 9.0.12 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 9.0.17 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 10.0.6 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 10.0.9 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 11.0.0-preview.3.26207.106 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+
+--- Classic .NET Framework ---
+
+PSChildName Version   Release
+----------- -------   -------
+Client      4.8.09221  533509
+Full        4.8.09221  533509
+Client      4.0.0.0          
+
+
+
+PS C:\WINDOWS\system32> D:\Automated_Cleanup_Script_for_Outdated_dotNET.ps1
+
+  *** DEBUG MODE - .NET Cleanup Script ***
+  Log file -> C:\%USERPROFILE%\AppData\Local\Temp\DotNet-Cleanup-Debug.log
+
+[02:01:47]  [--------]  0%  |  Stage 0/8  -  Admin check & variable init
+[02:01:47]  [#-------]  12%  |  Stage 1/8  -  Scanning registry - HKLM + HKU user hives
+[02:01:49]  [##------]  25%  |  Stage 2/8  -  Registry scan complete - 79 .NET product(s) discovered
+
+  DISCOVERED .NET PRODUCTS:
+    [FOUND]  Asp            v3.0.3  |  Major: 3  |  Microsoft ASP.NET Core 3.0.3 Shared Framework (x64)
+    [FOUND]  Asp            v11.0.0  |  Major: 11  |  Microsoft ASP.NET Core Targeting Pack - 11.0.0 Preview 3 (x64)
+    [FOUND]  Host           v2.0.9  |  Major: 2  |  Microsoft .NET Core Host - 2.0.9 (x64)
+    [FOUND]  Sdk            v2.2.207  |  Major: 2  |  Microsoft .NET Core SDK 2.2.207 (x64)
+    [FOUND]  Sdk            v2.1.202  |  Major: 2  |  Microsoft .NET Core SDK - 2.1.202 (x64)
+    [FOUND]  Asp            v6.0.36  |  Major: 6  |  Microsoft ASP.NET Core 6.0.36 Targeting Pack (x64)
+    [FOUND]  Asp            v10.0.9  |  Major: 10  |  Microsoft ASP.NET Core Runtime - 10.0.9 (x64)
+    [FOUND]  Asp            v9.0.12  |  Major: 9  |  Microsoft ASP.NET Core 9.0.12 Shared Framework (x64)
+    [FOUND]  Asp            v3.0.1  |  Major: 3  |  Microsoft ASP.NET Core 3.0.1 Targeting Pack (x64)
+    [FOUND]  Host           v10.0.9  |  Major: 10  |  Microsoft .NET Host - 10.0.9 (x64)
+    [FOUND]  Runtime        v7.0.20  |  Major: 7  |  Microsoft .NET Runtime - 7.0.20 (x64)
+    [FOUND]  Sdk            v2.1.818  |  Major: 2  |  Microsoft .NET Core SDK 2.1.818 (x64)
+    [FOUND]  Runtime        v1.1.13  |  Major: 1  |  Microsoft .NET Core 1.1.13 - Runtime (x64)
+    [FOUND]  Asp            v3.1.32  |  Major: 3  |  Microsoft ASP.NET Core 3.1.32 Shared Framework (x64)
+    [FOUND]  Runtime        v1.0.12  |  Major: 1  |  Microsoft .NET Core 1.0.12 - Runtime (x64)
+    [FOUND]  Host           v9.0.17  |  Major: 9  |  Microsoft .NET Host FX Resolver - 9.0.17 (x64)
+    [FOUND]  Asp            v10.0.6  |  Major: 10  |  Microsoft ASP.NET Core Targeting Pack - 10.0.6 (x64)
+    [FOUND]  Host           v11.0.0  |  Major: 11  |  Microsoft .NET Host - 11.0.0 Preview 5 (x64)
+    [FOUND]  Runtime        v10.0.9  |  Major: 10  |  Microsoft .NET Runtime - 10.0.9 (x64)
+    [FOUND]  Asp            v2.1.30  |  Major: 2  |  Microsoft ASP.NET Core 2.1.30 Shared Framework (x64)
+    [FOUND]  Asp            v8.0.28  |  Major: 8  |  Microsoft ASP.NET Core 8.0.28 Targeting Pack (x64)
+    [FOUND]  Host           v3.0.3  |  Major: 3  |  Microsoft .NET Core Host FX Resolver - 3.0.3 (x64)
+    [FOUND]  Runtime        v5.0.17  |  Major: 5  |  Microsoft .NET Runtime - 5.0.17 (x64)
+    [FOUND]  Runtime        v11.0.0  |  Major: 11  |  Microsoft .NET Runtime - 11.0.0 Preview 3 (x64)
+    [FOUND]  Host           v10.0.6  |  Major: 10  |  Microsoft .NET Host FX Resolver - 10.0.6 (x64)
+    [FOUND]  Asp            v9.0.17  |  Major: 9  |  Microsoft ASP.NET Core 9.0.17 Targeting Pack (x64)
+    [FOUND]  Host           v1.0.16  |  Major: 1  |  Microsoft .NET Core 1.0.16 - Host FX Resolver (x64)
+    [FOUND]  Runtime        v9.0.12  |  Major: 9  |  Microsoft .NET Runtime - 9.0.12 (x64)
+    [FOUND]  Asp            v5.0.0  |  Major: 5  |  Microsoft ASP.NET Core 5.0.0 Targeting Pack (x64)
+    [FOUND]  Host           v2.1.26  |  Major: 2  |  Microsoft .NET Core Host FX Resolver - 2.1.26 (x64)
+    [FOUND]  Asp            v7.0.20  |  Major: 7  |  Microsoft ASP.NET Core 7.0.20 Targeting Pack (x64)
+    [FOUND]  Asp            v2.0.9  |  Major: 2  |  Microsoft ASP.NET Core 2.0.9 Runtime Package Store (x64)
+    [FOUND]  Host           v1.0.12  |  Major: 1  |  Microsoft .NET Core 1.0.12 - Host FX Resolver (x64)
+    [FOUND]  Runtime        v2.2.8  |  Major: 2  |  Microsoft .NET Core Runtime - 2.2.8 (x64)
+    [FOUND]  Host           v3.1.32  |  Major: 3  |  Microsoft .NET Core Host - 3.1.32 (x64)
+    [FOUND]  Host           v5.0.17  |  Major: 5  |  Microsoft .NET Host FX Resolver - 5.0.17 (x64)
+    [FOUND]  Host           v2.0.6  |  Major: 2  |  Microsoft .NET Core Host - 2.0.6 (x64)
+    [FOUND]  Host           v2.1.30  |  Major: 2  |  Microsoft .NET Core Host - 2.1.30 (x64)
+    [FOUND]  Runtime        v2.1.30  |  Major: 2  |  Microsoft .NET Core Runtime - 2.1.30 (x64)
+    [FOUND]  Runtime        v8.0.28  |  Major: 8  |  Microsoft .NET Runtime - 8.0.28 (x64)
+    [FOUND]  Runtime        v1.0.16  |  Major: 1  |  Microsoft .NET Core 1.0.16 - Runtime (x64)
+    [FOUND]  Asp            v2.2.8  |  Major: 2  |  Microsoft ASP.NET Core 2.2.8 Shared Framework (x64)
+    [FOUND]  Runtime        v3.1.32  |  Major: 3  |  Microsoft .NET Core Runtime - 3.1.32 (x64)
+    [FOUND]  Runtime        v2.0.9  |  Major: 2  |  Microsoft .NET Core Runtime - 2.0.9 (x64)
+    [FOUND]  Host           v6.0.36  |  Major: 6  |  Microsoft .NET Host FX Resolver - 6.0.36 (x64)
+    [FOUND]  Sdk            v3.0.103  |  Major: 3  |  Microsoft .NET Core SDK 3.0.103 (x64)
+    [FOUND]  Host           v2.2.8  |  Major: 2  |  Microsoft .NET Core Host - 2.2.8 (x64)
+    [FOUND]  Host           v7.0.20  |  Major: 7  |  Microsoft .NET Host FX Resolver - 7.0.20 (x64)
+    [FOUND]  Sdk            v1.1.14  |  Major: 1  |  .NET Core SDK 1.1.14 (x64)
+    [FOUND]  Asp            v5.0.17  |  Major: 5  |  Microsoft ASP.NET Core 5.0.17 Shared Framework (x64)
+    [FOUND]  Host           v9.0.12  |  Major: 9  |  Microsoft .NET Host FX Resolver - 9.0.12 (x64)
+    [FOUND]  Runtime        v6.0.36  |  Major: 6  |  Microsoft .NET Runtime - 6.0.36 (x64)
+    [FOUND]  Runtime        v1.1.8  |  Major: 1  |  Microsoft .NET Core 1.1.8 - Runtime (x64)
+    [FOUND]  Host           v8.0.28  |  Major: 8  |  Microsoft .NET Host - 8.0.28 (x64)
+    [FOUND]  Runtime        v2.1.26  |  Major: 2  |  Microsoft .NET Core Runtime - 2.1.26 (x64)
+    [FOUND]  Runtime        v2.0.6  |  Major: 2  |  Microsoft .NET Core Runtime - 2.0.6 (x64)
+    [FOUND]  Host           v1.1.8  |  Major: 1  |  Microsoft .NET Core 1.1.8 - Host FX Resolver (x64)
+    [FOUND]  Host           v1.1.13  |  Major: 1  |  Microsoft .NET Core 1.1.13 - Host FX Resolver (x64)
+    [FOUND]  Runtime        v10.0.6  |  Major: 10  |  Microsoft .NET Runtime - 10.0.6 (x64)
+    [FOUND]  Runtime        v9.0.17  |  Major: 9  |  Microsoft .NET Runtime - 9.0.17 (x64)
+    [FOUND]  Runtime        v3.0.3  |  Major: 3  |  Microsoft .NET Core Runtime - 3.0.3 (x64)
+    [FOUND]  Asp            v3.1.10  |  Major: 3  |  Microsoft ASP.NET Core 3.1.10 Targeting Pack (x64)
+    [FOUND]  HostingBundle  v6.0.36  |  Major: 6  |  Microsoft ASP.NET Core 6.0.36 Hosting Bundle Options
+    [FOUND]  Asp            v8.0.27  |  Major: 8  |  Microsoft ASP.NET Core 8.0.27 Targeting Pack (x86)
+    [FOUND]  Runtime        v8.0.27  |  Major: 8  |  Microsoft .NET Runtime - 8.0.27 (x86)
+    [FOUND]  Sdk            v8.0.421  |  Major: 8  |  Microsoft .NET SDK 8.0.421 (x86)
+    [FOUND]  Sdk            v9.0.315  |  Major: 9  |  Microsoft .NET SDK 9.0.315 (x86)
+    [FOUND]  Sdk            v7.0.410  |  Major: 7  |  Microsoft .NET SDK 7.0.410 (x64)
+    [FOUND]  Sdk            v8.0.422  |  Major: 8  |  Microsoft .NET SDK 8.0.422 (x86)
+    [FOUND]  Sdk            v6.0.428  |  Major: 6  |  Microsoft .NET SDK 6.0.428 (x86)
+    [FOUND]  Sdk            v10.0.202  |  Major: 10  |  Microsoft .NET SDK 10.0.202 (x86)
+    [FOUND]  Sdk            v5.0.408  |  Major: 5  |  Microsoft .NET SDK 5.0.408 (x64)
+    [FOUND]  Sdk            v10.0.301  |  Major: 10  |  Microsoft .NET SDK 10.0.301 (x86)
+    [FOUND]  HostingBundle  v7.0.20  |  Major: 7  |  Microsoft ASP.NET Core 7.0.20 Hosting Bundle Options
+    [FOUND]  Sdk            v9.0.310  |  Major: 9  |  Microsoft .NET SDK 9.0.310 (x86)
+    [FOUND]  Sdk            v11.0.100  |  Major: 11  |  Microsoft .NET SDK 11.0.100-preview.3.26207.106 (x86)
+    [FOUND]  HostingBundle  v5.0.17  |  Major: 5  |  Microsoft ASP.NET Core 5.0.17 Hosting Bundle Options
+    [FOUND]  Host           v8.0.27  |  Major: 8  |  Microsoft .NET Host FX Resolver - 8.0.27 (x86)
+    [FOUND]  Sdk            v3.1.426  |  Major: 3  |  Microsoft .NET Core SDK 3.1.426 (x86)
+
+[02:01:49]  [###-----]  38%  |  Stage 3/8  -  Removal targets resolved - 63 component(s) queued for removal
+
+  COMPONENTS QUEUED FOR REMOVAL:
+    [TARGET] Asp            v3.0.3  |  Major: 3  |  Microsoft ASP.NET Core 3.0.3 Shared Framework (x64)
+    [TARGET] Host           v2.0.9  |  Major: 2  |  Microsoft .NET Core Host - 2.0.9 (x64)
+    [TARGET] Sdk            v2.2.207  |  Major: 2  |  Microsoft .NET Core SDK 2.2.207 (x64)
+    [TARGET] Sdk            v2.1.202  |  Major: 2  |  Microsoft .NET Core SDK - 2.1.202 (x64)
+    [TARGET] Asp            v6.0.36  |  Major: 6  |  Microsoft ASP.NET Core 6.0.36 Targeting Pack (x64)
+    [TARGET] Asp            v9.0.12  |  Major: 9  |  Microsoft ASP.NET Core 9.0.12 Shared Framework (x64)
+    [TARGET] Asp            v3.0.1  |  Major: 3  |  Microsoft ASP.NET Core 3.0.1 Targeting Pack (x64)
+    [TARGET] Runtime        v7.0.20  |  Major: 7  |  Microsoft .NET Runtime - 7.0.20 (x64)
+    [TARGET] Sdk            v2.1.818  |  Major: 2  |  Microsoft .NET Core SDK 2.1.818 (x64)
+    [TARGET] Runtime        v1.1.13  |  Major: 1  |  Microsoft .NET Core 1.1.13 - Runtime (x64)
+    [TARGET] Asp            v3.1.32  |  Major: 3  |  Microsoft ASP.NET Core 3.1.32 Shared Framework (x64)
+    [TARGET] Runtime        v1.0.12  |  Major: 1  |  Microsoft .NET Core 1.0.12 - Runtime (x64)
+    [TARGET] Asp            v10.0.6  |  Major: 10  |  Microsoft ASP.NET Core Targeting Pack - 10.0.6 (x64)
+    [TARGET] Asp            v2.1.30  |  Major: 2  |  Microsoft ASP.NET Core 2.1.30 Shared Framework (x64)
+    [TARGET] Host           v3.0.3  |  Major: 3  |  Microsoft .NET Core Host FX Resolver - 3.0.3 (x64)
+    [TARGET] Runtime        v5.0.17  |  Major: 5  |  Microsoft .NET Runtime - 5.0.17 (x64)
+    [TARGET] Host           v10.0.6  |  Major: 10  |  Microsoft .NET Host FX Resolver - 10.0.6 (x64)
+    [TARGET] Host           v1.0.16  |  Major: 1  |  Microsoft .NET Core 1.0.16 - Host FX Resolver (x64)
+    [TARGET] Runtime        v9.0.12  |  Major: 9  |  Microsoft .NET Runtime - 9.0.12 (x64)
+    [TARGET] Asp            v5.0.0  |  Major: 5  |  Microsoft ASP.NET Core 5.0.0 Targeting Pack (x64)
+    [TARGET] Host           v2.1.26  |  Major: 2  |  Microsoft .NET Core Host FX Resolver - 2.1.26 (x64)
+    [TARGET] Asp            v7.0.20  |  Major: 7  |  Microsoft ASP.NET Core 7.0.20 Targeting Pack (x64)
+    [TARGET] Asp            v2.0.9  |  Major: 2  |  Microsoft ASP.NET Core 2.0.9 Runtime Package Store (x64)
+    [TARGET] Host           v1.0.12  |  Major: 1  |  Microsoft .NET Core 1.0.12 - Host FX Resolver (x64)
+    [TARGET] Runtime        v2.2.8  |  Major: 2  |  Microsoft .NET Core Runtime - 2.2.8 (x64)
+    [TARGET] Host           v3.1.32  |  Major: 3  |  Microsoft .NET Core Host - 3.1.32 (x64)
+    [TARGET] Host           v5.0.17  |  Major: 5  |  Microsoft .NET Host FX Resolver - 5.0.17 (x64)
+    [TARGET] Host           v2.0.6  |  Major: 2  |  Microsoft .NET Core Host - 2.0.6 (x64)
+    [TARGET] Host           v2.1.30  |  Major: 2  |  Microsoft .NET Core Host - 2.1.30 (x64)
+    [TARGET] Runtime        v2.1.30  |  Major: 2  |  Microsoft .NET Core Runtime - 2.1.30 (x64)
+    [TARGET] Runtime        v1.0.16  |  Major: 1  |  Microsoft .NET Core 1.0.16 - Runtime (x64)
+    [TARGET] Asp            v2.2.8  |  Major: 2  |  Microsoft ASP.NET Core 2.2.8 Shared Framework (x64)
+    [TARGET] Runtime        v3.1.32  |  Major: 3  |  Microsoft .NET Core Runtime - 3.1.32 (x64)
+    [TARGET] Runtime        v2.0.9  |  Major: 2  |  Microsoft .NET Core Runtime - 2.0.9 (x64)
+    [TARGET] Host           v6.0.36  |  Major: 6  |  Microsoft .NET Host FX Resolver - 6.0.36 (x64)
+    [TARGET] Sdk            v3.0.103  |  Major: 3  |  Microsoft .NET Core SDK 3.0.103 (x64)
+    [TARGET] Host           v2.2.8  |  Major: 2  |  Microsoft .NET Core Host - 2.2.8 (x64)
+    [TARGET] Host           v7.0.20  |  Major: 7  |  Microsoft .NET Host FX Resolver - 7.0.20 (x64)
+    [TARGET] Sdk            v1.1.14  |  Major: 1  |  .NET Core SDK 1.1.14 (x64)
+    [TARGET] Asp            v5.0.17  |  Major: 5  |  Microsoft ASP.NET Core 5.0.17 Shared Framework (x64)
+    [TARGET] Host           v9.0.12  |  Major: 9  |  Microsoft .NET Host FX Resolver - 9.0.12 (x64)
+    [TARGET] Runtime        v6.0.36  |  Major: 6  |  Microsoft .NET Runtime - 6.0.36 (x64)
+    [TARGET] Runtime        v1.1.8  |  Major: 1  |  Microsoft .NET Core 1.1.8 - Runtime (x64)
+    [TARGET] Runtime        v2.1.26  |  Major: 2  |  Microsoft .NET Core Runtime - 2.1.26 (x64)
+    [TARGET] Runtime        v2.0.6  |  Major: 2  |  Microsoft .NET Core Runtime - 2.0.6 (x64)
+    [TARGET] Host           v1.1.8  |  Major: 1  |  Microsoft .NET Core 1.1.8 - Host FX Resolver (x64)
+    [TARGET] Host           v1.1.13  |  Major: 1  |  Microsoft .NET Core 1.1.13 - Host FX Resolver (x64)
+    [TARGET] Runtime        v10.0.6  |  Major: 10  |  Microsoft .NET Runtime - 10.0.6 (x64)
+    [TARGET] Runtime        v3.0.3  |  Major: 3  |  Microsoft .NET Core Runtime - 3.0.3 (x64)
+    [TARGET] Asp            v3.1.10  |  Major: 3  |  Microsoft ASP.NET Core 3.1.10 Targeting Pack (x64)
+    [TARGET] HostingBundle  v6.0.36  |  Major: 6  |  Microsoft ASP.NET Core 6.0.36 Hosting Bundle Options
+    [TARGET] Asp            v8.0.27  |  Major: 8  |  Microsoft ASP.NET Core 8.0.27 Targeting Pack (x86)
+    [TARGET] Runtime        v8.0.27  |  Major: 8  |  Microsoft .NET Runtime - 8.0.27 (x86)
+    [TARGET] Sdk            v8.0.421  |  Major: 8  |  Microsoft .NET SDK 8.0.421 (x86)
+    [TARGET] Sdk            v7.0.410  |  Major: 7  |  Microsoft .NET SDK 7.0.410 (x64)
+    [TARGET] Sdk            v6.0.428  |  Major: 6  |  Microsoft .NET SDK 6.0.428 (x86)
+    [TARGET] Sdk            v10.0.202  |  Major: 10  |  Microsoft .NET SDK 10.0.202 (x86)
+    [TARGET] Sdk            v5.0.408  |  Major: 5  |  Microsoft .NET SDK 5.0.408 (x64)
+    [TARGET] HostingBundle  v7.0.20  |  Major: 7  |  Microsoft ASP.NET Core 7.0.20 Hosting Bundle Options
+    [TARGET] Sdk            v9.0.310  |  Major: 9  |  Microsoft .NET SDK 9.0.310 (x86)
+    [TARGET] HostingBundle  v5.0.17  |  Major: 5  |  Microsoft ASP.NET Core 5.0.17 Hosting Bundle Options
+    [TARGET] Host           v8.0.27  |  Major: 8  |  Microsoft .NET Host FX Resolver - 8.0.27 (x86)
+    [TARGET] Sdk            v3.1.426  |  Major: 3  |  Microsoft .NET Core SDK 3.1.426 (x86)
+
+[02:01:56]  [####----]  50%  |  Stage 4/8  -  Pass 1 - Official .NET Uninstall Tool  (Tool FOUND & ready)
+    [PASS1]  Microsoft ASP.NET Core 3.0.3 Shared Framework (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core Host - 2.0.9 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core SDK 2.2.207 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core SDK - 2.1.202 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft ASP.NET Core 6.0.36 Targeting Pack (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft ASP.NET Core 9.0.12 Shared Framework (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft ASP.NET Core 3.0.1 Targeting Pack (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Runtime - 7.0.20 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core SDK 2.1.818 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core 1.1.13 - Runtime (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft ASP.NET Core 3.1.32 Shared Framework (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core 1.0.12 - Runtime (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft ASP.NET Core Targeting Pack - 10.0.6 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft ASP.NET Core 2.1.30 Shared Framework (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core Host FX Resolver - 3.0.3 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Runtime - 5.0.17 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Host FX Resolver - 10.0.6 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core 1.0.16 - Host FX Resolver (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Runtime - 9.0.12 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft ASP.NET Core 5.0.0 Targeting Pack (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core Host FX Resolver - 2.1.26 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft ASP.NET Core 7.0.20 Targeting Pack (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft ASP.NET Core 2.0.9 Runtime Package Store (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core 1.0.12 - Host FX Resolver (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core Runtime - 2.2.8 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core Host - 3.1.32 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Host FX Resolver - 5.0.17 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core Host - 2.0.6 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core Host - 2.1.30 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core Runtime - 2.1.30 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core 1.0.16 - Runtime (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft ASP.NET Core 2.2.8 Shared Framework (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core Runtime - 3.1.32 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core Runtime - 2.0.9 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Host FX Resolver - 6.0.36 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core SDK 3.0.103 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core Host - 2.2.8 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Host FX Resolver - 7.0.20 (x64)  |  ExitCode: 1
+    [PASS1]  .NET Core SDK 1.1.14 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft ASP.NET Core 5.0.17 Shared Framework (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Host FX Resolver - 9.0.12 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Runtime - 6.0.36 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core 1.1.8 - Runtime (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Core Runtime - 2.1.26 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core Runtime - 2.0.6 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core 1.1.8 - Host FX Resolver (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core 1.1.13 - Host FX Resolver (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Runtime - 10.0.6 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core Runtime - 3.0.3 (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft ASP.NET Core 3.1.10 Targeting Pack (x64)  |  ExitCode: 1
+    [PASS1]  Microsoft ASP.NET Core 6.0.36 Hosting Bundle Options  |  ExitCode: 0
+    [PASS1]  Microsoft ASP.NET Core 8.0.27 Targeting Pack (x86)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Runtime - 8.0.27 (x86)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET SDK 8.0.421 (x86)  |  ExitCode: 0
+    [PASS1]  Microsoft .NET SDK 7.0.410 (x64)  |  ExitCode: -1
+    [PASS1]  Microsoft .NET SDK 6.0.428 (x86)  |  ExitCode: -1
+    [PASS1]  Microsoft .NET SDK 10.0.202 (x86)  |  ExitCode: -1
+    [PASS1]  Microsoft .NET SDK 5.0.408 (x64)  |  ExitCode: 0
+    [PASS1]  Microsoft ASP.NET Core 7.0.20 Hosting Bundle Options  |  ExitCode: 0
+    [PASS1]  Microsoft .NET SDK 9.0.310 (x86)  |  ExitCode: -1
+    [PASS1]  Microsoft ASP.NET Core 5.0.17 Hosting Bundle Options  |  ExitCode: 0
+    [PASS1]  Microsoft .NET Host FX Resolver - 8.0.27 (x86)  |  ExitCode: 1
+    [PASS1]  Microsoft .NET Core SDK 3.1.426 (x86)  |  ExitCode: 0
+[02:24:06]  [#####---]  62%  |  Stage 5/8  -  Pass 2 - ASP.NET Core Shared Framework direct removal
+[02:24:06]  [#####---]  62%  |  Stage 5/8  -  Pass 3 - Registry uninstall strings (HKLM + HKU)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 3.0.3 Shared Framework (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Host - 2.0.9 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core SDK 2.2.207 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core SDK - 2.1.202 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 6.0.36 Targeting Pack (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 9.0.12 Shared Framework (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 3.0.1 Targeting Pack (x64)
+    [PASS2]  Microsoft .NET Runtime - 7.0.20 (x64)  |  ExitCode: 0  |  Cmd: MsiExec.exe /X{221BB52A-B763-4C9D-AA62-4B0B6C9AAD62} /quiet /norestart
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core SDK 2.1.818 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core 1.1.13 - Runtime (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 3.1.32 Shared Framework (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core 1.0.12 - Runtime (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core Targeting Pack - 10.0.6 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 2.1.30 Shared Framework (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Host FX Resolver - 3.0.3 (x64)
+    [PASS2]  Microsoft .NET Runtime - 5.0.17 (x64)  |  ExitCode: 0  |  Cmd: MsiExec.exe /X{5A66E598-37BD-4C8A-A7CB-A71C32ABCD78} /quiet /norestart
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Host FX Resolver - 10.0.6 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core 1.0.16 - Host FX Resolver (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Runtime - 9.0.12 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 5.0.0 Targeting Pack (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Host FX Resolver - 2.1.26 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 7.0.20 Targeting Pack (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 2.0.9 Runtime Package Store (x64)
+    [PASS2]  Microsoft .NET Core 1.0.12 - Host FX Resolver (x64)  |  ExitCode: 0  |  Cmd: MsiExec.exe /X{8A28A764-19A5-4A8E-A4AA-D5FEF72ECB3B} /quiet /n
+orestart
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Runtime - 2.2.8 (x64)
+    [PASS2]  Microsoft .NET Core Host - 3.1.32 (x64)  |  ExitCode: 0  |  Cmd: MsiExec.exe /X{8A8E3A04-83BC-4CDE-9259-893B666C1AB1} /quiet /norestart
+    [PASS2]  Microsoft .NET Host FX Resolver - 5.0.17 (x64)  |  ExitCode: 0  |  Cmd: MsiExec.exe /X{8BA25391-0BE6-443A-8EBF-86A29BAFC479} /quiet /norest
+art
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Host - 2.0.6 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Host - 2.1.30 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Runtime - 2.1.30 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core 1.0.16 - Runtime (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 2.2.8 Shared Framework (x64)
+    [PASS2]  Microsoft .NET Core Runtime - 3.1.32 (x64)  |  ExitCode: 0  |  Cmd: MsiExec.exe /X{A741B803-3F0E-4684-81EF-FC128D15A92C} /quiet /norestart
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Runtime - 2.0.9 (x64)
+    [PASS2]  Microsoft .NET Host FX Resolver - 6.0.36 (x64)  |  ExitCode: 0  |  Cmd: MsiExec.exe /X{A9E32B25-994B-4856-A12B-0EBED3050410} /quiet /norest
+art
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core SDK 3.0.103 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Host - 2.2.8 (x64)
+    [PASS2]  Microsoft .NET Host FX Resolver - 7.0.20 (x64)  |  ExitCode: 0  |  Cmd: MsiExec.exe /X{B0FC828F-678C-4868-9B5B-99639758E6F3} /quiet /norest
+art
+    [PASS2]  Already removed (no registry entry) - .NET Core SDK 1.1.14 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 5.0.17 Shared Framework (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Host FX Resolver - 9.0.12 (x64)
+    [PASS2]  Microsoft .NET Runtime - 6.0.36 (x64)  |  ExitCode: 0  |  Cmd: MsiExec.exe /X{C912E33F-956A-4921-9F55-CC11AE8F09AF} /quiet /norestart
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core 1.1.8 - Runtime (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Runtime - 2.1.26 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Runtime - 2.0.6 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core 1.1.8 - Host FX Resolver (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core 1.1.13 - Host FX Resolver (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Runtime - 10.0.6 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core Runtime - 3.0.3 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 3.1.10 Targeting Pack (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 6.0.36 Hosting Bundle Options
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 8.0.27 Targeting Pack (x86)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Runtime - 8.0.27 (x86)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET SDK 8.0.421 (x86)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET SDK 7.0.410 (x64)
+    [PASS2]  Microsoft .NET SDK 6.0.428 (x86)  |  ExitCode: 0  |  Cmd: "C:\ProgramData\Package Cache\{41970fed-94dc-4a66-8c7d-4c7535fc7357}\dotnet-sdk-6
+.0.428-win-x86.exe" /uninstall /quiet
+    [PASS2]  Microsoft .NET SDK 10.0.202 (x86)  |  ExitCode: 0  |  Cmd: "C:\ProgramData\Package Cache\{4FCDDC6A-56B2-4E61-BB30-9A430F4D9307}\dotnet-sdk-
+10.0.202-win-x86.exe" /uninstall /quiet
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET SDK 5.0.408 (x64)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 7.0.20 Hosting Bundle Options
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET SDK 9.0.310 (x86)
+    [PASS2]  Already removed (no registry entry) - Microsoft ASP.NET Core 5.0.17 Hosting Bundle Options
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Host FX Resolver - 8.0.27 (x86)
+    [PASS2]  Already removed (no registry entry) - Microsoft .NET Core SDK 3.1.426 (x86)
+[02:26:33]  [######--]  75%  |  Stage 6/8  -  Pass 4 - WMI/CIM fallback for ghost MSI entries
+[02:36:46]  [#######-]  88%  |  Stage 7/8  -  Deep clean - leftover filesystem folders & ghost registry keys
+[02:36:50]  [########]  100%  |  Stage 8/8  -  COMPLETED SUCCESSFULLY - Exit 0
+
+  Log saved -> C:\Users\%USERPROFILE%\AppData\Local\Temp\DotNet-Cleanup-Debug.log
+
+PS C:\WINDOWS\system32> D:\Detect_dotNET.ps1
+--- Modern .NET (Core / 5+) Runtimes ---
+Microsoft.AspNetCore.App 8.0.28 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 9.0.17 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 10.0.9 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 11.0.0-preview.3.26207.106 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.NETCore.App 8.0.28 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 9.0.17 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.9 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 11.0.0-preview.3.26207.106 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 11.0.0-preview.5.26302.115 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.WindowsDesktop.App 8.0.28 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 9.0.17 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 10.0.9 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+Microsoft.WindowsDesktop.App 11.0.0-preview.3.26207.106 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+
+--- Classic .NET Framework ---
+
+PSChildName Version   Release
+----------- -------   -------
+Client      4.8.09221  533509
+Full        4.8.09221  533509
+Client      4.0.0.0           
