@@ -1,36 +1,227 @@
-.NET Enterprise Cleanup Tool
-A PowerShell script designed for enterprise deployment (e.g., via SCCM) that silently discovers and forcefully uninstalls End-of-Life (EOL) .NET SDKs, Runtimes, and ASP.NET Shared Frameworks, as well as outdated patch versions of supported .NET major releases.
+🛡️ .NET Enterprise Cleanup & Remediation Tool
+Enterprise-grade PowerShell solution for automated .NET lifecycle management, vulnerability remediation, and security compliance.
 
-⚙️ How It Works
-This script automates the tedious process of cleaning up outdated Microsoft .NET environments on Windows machines. It operates through a multi-pass approach to ensure thorough removal:
+________________________________________
+📖 Overview
+The .NET Enterprise Cleanup & Remediation Tool is a PowerShell-based enterprise remediation solution designed to automatically discover, evaluate, and remove:
 
-Discovery: Scans system and user registry hives (HKLM and HKU) to inventory all installed .NET SDKs, Desktop Runtimes, Hosting Bundles, and ASP.NET Core Shared Frameworks.
+✅ End-of-Life (EOL) .NET Versions
+✅ Organizationally Unapproved .NET Versions
+✅ Obsolete Patch Versions of Supported Releases
+✅ .NET SDKs
+✅ .NET Runtimes
+✅ Windows Desktop Runtimes
+✅ ASP.NET Core Shared Frameworks
+✅ ASP.NET Core Runtime Components
+✅ Host FX Resolvers
+✅ Hosting Bundles
+✅ Windows Server Hosting Packages
+✅ Orphaned Filesystem Artifacts
+✅ Stale Registry Entries
 
-Targeting: Calculates which versions to remove based on an explicit EOL list and automatically flags older patch versions of currently supported major releases for removal.
+Designed specifically for:
+•	🖥️ Microsoft Configuration Manager (SCCM/MECM)
+•	☁️ Microsoft Intune
+•	🔐 Vulnerability Management Teams
+•	🛡️ Security Operations Teams
+•	⚙️ Platform Engineering Teams
+•	🏢 Enterprise Server Environments
+________________________________________
 
-Execution : If provided alongside the script, it temporarily installs the official dotnet-core-uninstall.msi tool to handle the bulk of the uninstalls safely.
+🎯 Why This Tool Exists
+Modern vulnerability scanners frequently identify outdated and unsupported .NET installations, including:
+•	Qualys
+•	Microsoft Defender Vulnerability Management
+•	Tenable
+•	Rapid7 InsightVM
+•	Nessus
 
-Execution (Fallbacks): For components the official tool misses or if the tool isn't available, it falls back to native uninstall strings (msiexec), direct folder deletion (for ASP.NET Shared Frameworks), and WMI/CIM invocation for "ghost" MSI entries.
+Manual remediation of .NET runtimes across hundreds or thousands of endpoints is:
+❌ Time consuming
+❌ Error prone
+❌ Difficult to audit
+❌ Inconsistent across teams
+This tool provides a standardized, auditable, and scalable remediation process.
 
-Deep Clean: Sweeps the C:\Program Files\dotnet directory and registry for leftover orphaned folders and keys, removing them forcefully.
+________________________________________
 
-Reporting: Tracks failures globally and exits with 0 for complete success or 1 if any uninstall operation failed, allowing deployment tools like SCCM to queue retries.
+🚀 Key Features
+🔍 Comprehensive Discovery
+Automatically discovers:
+•	.NET SDKs
+•	.NET Runtimes
+•	Windows Desktop Runtimes
+•	ASP.NET Core Shared Frameworks
+•	ASP.NET Core Runtime Components
+•	Host FX Resolvers
+•	Hosting Bundles
+•	Windows Server Hosting Components
+Supports:
+•	x64 Installations
+•	x86 Installations
+•	Per-Machine Installations
+•	Per-User Installations
+________________________________________
 
-⚠️ Prerequisites & Important Notes
-Permissions: The script contains a hard stop at the beginning; it will immediately Exit 1 if not run with local Administrator privileges.
+🛡️ Vulnerability Remediation
+Removes:
+•	EOL .NET Versions
+•	Organizationally Unapproved Versions
+•	Unsupported Components
+•	Obsolete Patch Releases
+Example:
+Installed:
+8.0.12
+8.0.16
+8.0.18
 
-Dependencies: For optimal performance, the official Microsoft dotnet-core-uninstall.msi file should be placed in the exact same directory as this script. The script will automatically install it, use it, and cleanly uninstall it at the end.
+Retained:
+8.0.18
 
-Safety: It uses an intelligent deduplication tracker and determines the highest installed patch version for supported releases. This ensures it doesn't accidentally break active development environments by uninstalling required, up-to-date SDKs.
+Removed:
+8.0.12
+8.0.16
+________________________________________
 
-🛠️ Configuration (Future Updates)
-To update the script when a currently supported version of .NET (e.g., .NET 8) reaches its End-of-Life, you only need to modify the $explicitEolMajorVersions variable located near the top of the script.
+⚙️ Multi-Stage Uninstall Engine
+The script attempts removal using multiple methods:
+🥇 Method 1 – Microsoft .NET Uninstall Tool
+Uses:
+dotnet-core-uninstall.msi
+Example:
+remove 6.0.36 --runtime --x64 --yes
+________________________________________
+🥈 Method 2 – MSI Uninstall
+msiexec /x {GUID} /qn /norestart
+________________________________________
+🥉 Method 3 – Native Uninstall Strings
+Uses uninstall commands registered by Microsoft installers.
+________________________________________
+🧹 Deep Cleanup
+Removes orphaned remnants from:
+C:\Program Files\dotnet
+C:\Program Files (x86)\dotnet
+C:\ProgramData\dotnet
+Including:
+•	SDK Folders
+•	Runtime Folders
+•	ASP.NET Components
+•	Desktop Runtime Components
+•	Stale Registry Entries
+________________________________________
+🔄 Script Workflow
+The script executes through a structured remediation pipeline:
+PHASE 1  - Script Initialization
+PHASE 2  - Pre-Cleanup Validation
+PHASE 3  - Product Discovery
+PHASE 4  - Version Analysis
+PHASE 5  - Target Selection
+PHASE 6  - Uninstall Tool Detection
+PHASE 7  - Uninstall Execution
+PHASE 8  - Filesystem Cleanup
+PHASE 9  - Registry Cleanup
+PHASE 10 - Post-Cleanup Validation
+PHASE 11 - Execution Summary
+________________________________________
+📊 Example Execution
+Products Discovered: 44
 
-Current Configuration:
-PowerShell
-$explicitEolMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
-How to update it:
-Simply add the new major version integer to the comma-separated list inside the parentheses. For example, when .NET 8 reaches EOL, change it to:
+Products Targeted: 23
 
-PowerShell
-$explicitEolMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7, 8)
+Examples:
+
+Microsoft .NET Runtime - 5.0.17
+Microsoft .NET Runtime - 6.0.36
+Microsoft .NET Runtime - 7.0.20
+
+Microsoft ASP.NET Core Shared Framework 6.0.36
+
+Microsoft .NET Host FX Resolver 6.0.36
+
+Windows Server Hosting Packages
+________________________________________
+📝 Enterprise Logging
+The script includes detailed phase-based logging with timestamps.
+Example:
+2026-06-11 04:01:05 [19968] PHASE 5 - TARGET SELECTION
+
+2026-06-11 04:01:05 [19968] Total discovered products: 44
+
+2026-06-11 04:01:05 [19968] Products targeted for removal: 23
+
+2026-06-11 04:01:05 [19968] TARGET:
+Microsoft .NET Runtime - 6.0.36 (x64)
+________________________________________
+📂 Log Locations
+SCCM Devices
+C:\Windows\CCM\Logs\DotNetCleanup.log
+Non-SCCM Devices
+%TEMP%\DotNetCleanup.log
+________________________________________
+🔧 Configuration
+Single Maintenance Variable
+The entire remediation scope is controlled by a single variable:
+$eolOrUnapprovedMajorVersions =
+[System.Collections.Generic.HashSet[int]]@(1,2,3,5,6,7)
+________________________________________
+Example
+When .NET 8 reaches End-of-Life:
+$eolOrUnapprovedMajorVersions =
+[System.Collections.Generic.HashSet[int]]@(1,2,3,5,6,7,8)
+No additional code changes should normally be required.
+________________________________________
+📅 Recommended Execution Schedule
+Monthly
+Recommended execution frequency:
+Once Per Month
+Best practice:
+✅ After Microsoft Patch Tuesday
+✅ After Vulnerability Scanning Cycles
+✅ Following Critical Security Advisories
+This keeps supported .NET versions current while automatically removing superseded releases.
+________________________________________
+📤 Exit Codes
+Exit Code	Description
+✅ 0	Success
+❌ 1	Failure
+🔄 3010	Success – Reboot Required
+Fully compatible with:
+•	SCCM
+•	MECM
+•	Intune
+•	Enterprise Software Distribution Platforms
+________________________________________
+🔒 Security Benefits
+✔ Reduces Vulnerability Exposure
+✔ Removes Unsupported Software
+✔ Eliminates Version Sprawl
+✔ Improves Compliance Posture
+✔ Simplifies Patch Management
+✔ Provides Full Auditability
+✔ Supports Enterprise-Scale Remediation
+________________________________________
+🎯 Intended Use Cases
+•	Vulnerability Remediation
+•	Security Hardening
+•	Monthly Maintenance Activities
+•	SCCM ADR Deployments
+•	Compliance Enforcement
+•	Server Lifecycle Management
+•	Workstation Lifecycle Management
+•	Enterprise .NET Governance
+________________________________________
+⭐ Maintenance Philosophy
+One Variable. One Update. Full Control.
+Administrators only need to maintain:
+$eolOrUnapprovedMajorVersions
+This design keeps long-term ownership simple, predictable, and audit-friendly.
+________________________________________
+📌 Recommended Deployment
+Deployment Type : SCCM Application / Package
+Execution Mode  : SYSTEM
+Schedule        : Monthly
+Visibility      : Hidden
+User Interaction: None
+Logging         : Enabled
+________________________________________
+Built for Enterprise Security Operations, Vulnerability Management, and Platform Engineering Teams.
