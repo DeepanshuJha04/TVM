@@ -3,21 +3,21 @@
     Silently cleans up explicit EOL and superseded .NET (Core/5+) installations on Windows endpoints.
 
 .DESCRIPTION
-    Designed for SCCM Automatic Deployment Rules (ADR) as a silent, 
+    Designed for Enterprise Security Operations and SCCM Automatic Deployment Rules (ADR) as a silent, 
     background-execution script. This script aggressively identifies and removes outdated or explicitly 
     End-of-Life (EOL) .NET Runtimes, SDKs, ASP.NET Core Shared Frameworks, and Hosting Bundles. 
     
-    It utilizes the official Microsoft .NET Uninstall Tool if available, falling back to direct 
-    MSI/WMI and registry removal methods to ensure zero vulnerable traces remain on the endpoint.
+    It utilizes the official Microsoft .NET Uninstall Tool (targeting both x64 and x86), falling back 
+    to direct MSI/WMI and registry removal methods, followed by a deep-clean of x64 and x86 filesystems.
 
 .NOTES
     Execution Requirement: Must be executed as SYSTEM or an elevated local Administrator.
-    Output: Returns Exit Code 0 (Success) or 1 (Failure).
+    Output: Suppressed for silent background deployment. Returns Exit Code 0 (Success) or 1 (Failure).
 
     ===========================================================================
-    MAINTENANCE GUIDE: UPDATING FOR FUTURE EOL VERSIONS
+    MAINTENANCE GUIDE: UPDATING FOR FUTURE EOL OR UNAPPROVED VERSIONS
     ===========================================================================
-    When Microsoft announces a new .NET major version has reached End of Life 
+    When Microsoft announces a new .NET major version has reached End of Life or You want to add unsupported or unapproved versions
     (e.g., .NET 8), you must update the targeting variable in this script.
 
     Exact Variable to Look For:
@@ -34,12 +34,15 @@
 $ErrorActionPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-
 $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Exit 1 }
 
+# ==============================================================================
+# ⚠️ TARGET VARIABLE: UPDATE THIS WHEN A NEW EOL OR UNAPPROVED VERSION IS IDENTIFIED ⚠️
 $explicitEolMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
+# ==============================================================================
+
 $dotNetFrameworkExclusionPattern    = '\.NET Framework'
 $dotNetProductDisplayNamePattern    = '^Microsoft (\.NET|ASP\.NET Core)|^\.NET Core|^dotnet-'
 $dotNetSdkNamePattern               = 'SDK|dotnet-sdk'
@@ -56,17 +59,26 @@ $uninstallToolPossibleExePaths      = @(
     "${env:ProgramFiles(x86)}\dotnet-core-uninstall\dotnet-core-uninstall.exe",
     "${env:ProgramFiles}\dotnet-core-uninstall\dotnet-core-uninstall.exe"
 )
+
+
 $dotNetInstallRootFolder            = 'C:\Program Files\dotnet'
 $dotNetSdkSubFolder                 = "$dotNetInstallRootFolder\sdk"
 $dotNetSharedRuntimeFolder          = "$dotNetInstallRootFolder\shared"
+$dotNetInstallRootFolderX86         = 'C:\Program Files (x86)\dotnet'
+$dotNetSdkSubFolderX86              = "$dotNetInstallRootFolderX86\sdk"
+$dotNetSharedRuntimeFolderX86       = "$dotNetInstallRootFolderX86\shared"
 
 $globalUninstallFailureDetected = $false
 
 $dotNetFilesystemFolderToComponentTypeMap = [ordered]@{
-    $dotNetSdkSubFolder                                                   = 'Sdk'
-    "$dotNetSharedRuntimeFolder\Microsoft.NETCore.App"                    = 'Runtime'
-    "$dotNetSharedRuntimeFolder\Microsoft.WindowsDesktop.App"             = 'Desktop'
-    "$dotNetSharedRuntimeFolder\Microsoft.AspNetCore.App"                 = 'Asp'
+    $dotNetSdkSubFolder                                         = 'Sdk'
+    "$dotNetSharedRuntimeFolder\Microsoft.NETCore.App"          = 'Runtime'
+    "$dotNetSharedRuntimeFolder\Microsoft.WindowsDesktop.App"   = 'Desktop'
+    "$dotNetSharedRuntimeFolder\Microsoft.AspNetCore.App"       = 'Asp'
+    $dotNetSdkSubFolderX86                                      = 'Sdk'
+    "$dotNetSharedRuntimeFolderX86\Microsoft.NETCore.App"       = 'Runtime'
+    "$dotNetSharedRuntimeFolderX86\Microsoft.WindowsDesktop.App"= 'Desktop'
+    "$dotNetSharedRuntimeFolderX86\Microsoft.AspNetCore.App"    = 'Asp'
 }
 
 function Invoke-SilentProcessWithTimeout {
@@ -113,7 +125,6 @@ function Split-CommandLineIntoExecutableAndArguments {
     return @($splitResult[0], $(if ($splitResult.Count -gt 1) { $splitResult[1] } else { '' }))
 }
 
-
 $allRegistrySearchLocations = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
@@ -142,9 +153,11 @@ foreach ($registrySearchPath in $allRegistrySearchLocations) {
         $parsedProductVersion = [version]$versionRegexMatch.Groups[1].Value
         $detectedComponentType = Get-DotNetComponentTypeFromDisplayName -ProductDisplayName $currentEntry.DisplayName
         if ($detectedComponentType -eq 'Unknown') { return }
+        
         $deduplicationKey = "$detectedComponentType|$parsedProductVersion"
         if ($deduplicationTracker.ContainsKey($deduplicationKey)) { return }
         $deduplicationTracker[$deduplicationKey] = $true
+        
         $resolvedUninstallString = if ($currentEntry.QuietUninstallString) { $currentEntry.QuietUninstallString } else { $currentEntry.UninstallString }
         $allDiscoveredDotNetProducts.Add([PSCustomObject]@{
             DisplayName             = $currentEntry.DisplayName
@@ -170,9 +183,11 @@ foreach ($aspNetRegistryRoot in @($aspNetSharedFrameworkRegistryRoot, $aspNetSha
         if (-not $aspNetVersionRegexMatch.Success) { return }
         $parsedAspNetVersion = [version]$aspNetVersionRegexMatch.Groups[1].Value
         $aspNetMajorVersion  = [int]$aspNetVersionRegexMatch.Groups[1].Value.Split('.')[0]
+        
         $aspNetDedupeKey     = "AspShared|$parsedAspNetVersion"
         if ($deduplicationTracker.ContainsKey($aspNetDedupeKey)) { return }
         $deduplicationTracker[$aspNetDedupeKey] = $true
+        
         $allDiscoveredAspNetSharedFrameworks.Add([PSCustomObject]@{
             DisplayName        = "Microsoft ASP.NET Core $parsedAspNetVersion - Shared Framework"
             ParsedVersion      = $parsedAspNetVersion
@@ -181,7 +196,6 @@ foreach ($aspNetRegistryRoot in @($aspNetSharedFrameworkRegistryRoot, $aspNetSha
         })
     }
 }
-
 
 $latestPatchVersionPerSupportedMajorAndType = @{}
 $allDiscoveredDotNetProducts |
@@ -233,7 +247,6 @@ $aspNetSharedFrameworksTargetedForRemoval = $allDiscoveredAspNetSharedFrameworks
     )
 }
 
-
 if ((-not $finalProductsTargetedForRemoval -or @($finalProductsTargetedForRemoval).Count -eq 0) -and
     (-not $aspNetSharedFrameworksTargetedForRemoval -or @($aspNetSharedFrameworksTargetedForRemoval).Count -eq 0)) {
     Exit 0
@@ -258,8 +271,11 @@ if ($resolvedUninstallToolExePath) {
         $targetProduct = $_
         $toolFlag = $dotNetToolComponentTypeToFlagMap[$targetProduct.ComponentType]
         if ($toolFlag) {
-            $pass1ExitCode = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
-                -ProcessArguments "remove $($targetProduct.ParsedVersion.ToString()) $toolFlag --yes"
+            $pass1ExitCodeX64 = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
+                -ProcessArguments "remove $($targetProduct.ParsedVersion.ToString()) $toolFlag --x64 --yes"
+                
+            $pass1ExitCodeX86 = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
+                -ProcessArguments "remove $($targetProduct.ParsedVersion.ToString()) $toolFlag --x86 --yes"
         }
     }
 }
@@ -267,22 +283,32 @@ if ($resolvedUninstallToolExePath) {
 if ($resolvedUninstallToolExePath -and @($aspNetSharedFrameworksTargetedForRemoval).Count -gt 0) {
     @($aspNetSharedFrameworksTargetedForRemoval) | ForEach-Object {
         $aspNetTarget = $_
-        $aspPass1ExitCode = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
-            -ProcessArguments "remove $($aspNetTarget.ParsedVersion.ToString()) --aspnet-runtime --yes"
+        $aspPass1ExitCodeX64 = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
+            -ProcessArguments "remove $($aspNetTarget.ParsedVersion.ToString()) --aspnet-runtime --x64 --yes"
+            
+        $aspPass1ExitCodeX86 = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
+            -ProcessArguments "remove $($aspNetTarget.ParsedVersion.ToString()) --aspnet-runtime --x86 --yes"
     }
 }
 
 @($aspNetSharedFrameworksTargetedForRemoval) | ForEach-Object {
     $aspNetTarget = $_
     if (-not (Test-Path $aspNetTarget.RegistryKeyPath -ErrorAction SilentlyContinue)) { return }
-    $aspNetFolderPath = "$dotNetSharedRuntimeFolder\Microsoft.AspNetCore.App\$($aspNetTarget.ParsedVersion.ToString())"
-    if (Test-Path $aspNetFolderPath) {
-        Remove-Item -Path $aspNetFolderPath -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path $aspNetFolderPath) { $script:globalUninstallFailureDetected = $true }
+    
+    $aspNetFolderPathX64 = "$dotNetSharedRuntimeFolder\Microsoft.AspNetCore.App\$($aspNetTarget.ParsedVersion.ToString())"
+    if (Test-Path $aspNetFolderPathX64) {
+        Remove-Item -Path $aspNetFolderPathX64 -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $aspNetFolderPathX64) { $script:globalUninstallFailureDetected = $true }
     }
+
+    $aspNetFolderPathX86 = "$dotNetSharedRuntimeFolderX86\Microsoft.AspNetCore.App\$($aspNetTarget.ParsedVersion.ToString())"
+    if (Test-Path $aspNetFolderPathX86) {
+        Remove-Item -Path $aspNetFolderPathX86 -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $aspNetFolderPathX86) { $script:globalUninstallFailureDetected = $true }
+    }
+    
     Remove-Item -Path $aspNetTarget.RegistryKeyPath -Recurse -Force -ErrorAction SilentlyContinue
 }
-
 
 @($finalProductsTargetedForRemoval) | ForEach-Object {
     $targetProduct = $_
@@ -313,7 +339,6 @@ if ($resolvedUninstallToolExePath -and @($aspNetSharedFrameworksTargetedForRemov
         $script:globalUninstallFailureDetected = $true
     }
 }
-
 
 $dotNetFilesystemFolderToComponentTypeMap.GetEnumerator() | ForEach-Object {
     $folderRootPath      = $_.Key
