@@ -31,7 +31,6 @@
     ===========================================================================
 #>
 
-$ScriptStartTime = Get-Date
 $ErrorActionPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -41,7 +40,7 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 
 # ==============================================================================
 # ⚠️ TARGET VARIABLE: UPDATE THIS WHEN A NEW EOL OR UNAPPROVED VERSION IS IDENTIFIED ⚠️
-$eolOrUnapprovedMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7, 8, 9, 10 , 11)
+$eolOrUnapprovedMajorVersions           = [System.Collections.Generic.HashSet[int]]@(1, 2, 3, 5, 6, 7)
 # ==============================================================================
 
 $dotNetFrameworkExclusionPattern    = '\.NET Framework'
@@ -86,18 +85,7 @@ function Write-Log {
     param([string]$Message)
     try {
         Add-Content -Path $LogFile -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$PID] $Message"
-    }
-
-function Write-DetailedLog {
-    param(
-        [string]$Action,
-        [string]$Target,
-        [string]$Result = "",
-        [string]$Details = ""
-    )
-    Write-Log "$Action | Target=$Target | Result=$Result | Details=$Details"
-}
- catch {}
+    } catch {}
 }
 
 
@@ -322,7 +310,13 @@ $aspNetSharedFrameworksTargetedForRemoval = $allDiscoveredAspNetSharedFrameworks
 }
 
 Write-LogPhase "PHASE 5 - TARGET SELECTION"
+
+$ScriptMetrics.ProductsDiscovered = @($allDiscoveredDotNetProducts).Count
+$ScriptMetrics.EolTargets = @($finalProductsTargetedForRemoval | Where-Object { $eolOrUnapprovedMajorVersions.Contains($_.MajorVersionNumber) }).Count
+$ScriptMetrics.ObsoletePatchTargets = @($finalProductsTargetedForRemoval).Count - $ScriptMetrics.EolTargets
+
 Write-Log "Total discovered products: $($allDiscoveredDotNetProducts.Count)"
+
 Write-Log "Products targeted for removal: $(@($finalProductsTargetedForRemoval).Count)"
 Write-Log "ASP.NET targeted for removal: $(@($aspNetSharedFrameworksTargetedForRemoval).Count)"
 foreach ($item in @($finalProductsTargetedForRemoval)) { Write-Log "TARGET: $($item.DisplayName)" }
@@ -353,9 +347,11 @@ if ($resolvedUninstallToolExePath) {
         $targetProduct = $_
         $toolFlag = $dotNetToolComponentTypeToFlagMap[$targetProduct.ComponentType]
         if ($toolFlag) {
+            Write-Log "DOTNET-TOOL REMOVE X64 | $($targetProduct.DisplayName)"
             $pass1ExitCodeX64 = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
                 -ProcessArguments "remove $($targetProduct.ParsedVersion.ToString()) $toolFlag --x64 --yes"
                 
+            Write-Log "DOTNET-TOOL REMOVE X86 | $($targetProduct.DisplayName)"
             $pass1ExitCodeX86 = Invoke-SilentProcessWithTimeout -ExecutablePath $resolvedUninstallToolExePath `
                 -ProcessArguments "remove $($targetProduct.ParsedVersion.ToString()) $toolFlag --x86 --yes"
         }
@@ -379,16 +375,19 @@ if ($resolvedUninstallToolExePath -and @($aspNetSharedFrameworksTargetedForRemov
     
     $aspNetFolderPathX64 = "$dotNetSharedRuntimeFolder\Microsoft.AspNetCore.App\$($aspNetTarget.ParsedVersion.ToString())"
     if (Test-Path $aspNetFolderPathX64) {
+        Write-Log "DELETE FOLDER: $aspNetFolderPathX64"
         Remove-Item -Path $aspNetFolderPathX64 -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path $aspNetFolderPathX64) { $script:globalUninstallFailureDetected = $true }
     }
 
     $aspNetFolderPathX86 = "$dotNetSharedRuntimeFolderX86\Microsoft.AspNetCore.App\$($aspNetTarget.ParsedVersion.ToString())"
     if (Test-Path $aspNetFolderPathX86) {
+        Write-Log "DELETE FOLDER: $aspNetFolderPathX86"
         Remove-Item -Path $aspNetFolderPathX86 -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path $aspNetFolderPathX86) { $script:globalUninstallFailureDetected = $true }
     }
     
+    Write-Log "DELETE REGISTRY: $($aspNetTarget.RegistryKeyPath)"
     Remove-Item -Path $aspNetTarget.RegistryKeyPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -499,22 +498,3 @@ if ($script:rebootRequired) {
 }
 
 Exit 0
-
-
-# Enhanced execution summary
-try {
-    $ExecutionDuration = New-TimeSpan -Start $ScriptStartTime -End (Get-Date)
-    Write-Log "Execution Time: $($ExecutionDuration.ToString())"
-    if ($preInstalledSDKs) {
-        Write-Log "SDKs Before: $($preInstalledSDKs.Count)"
-    }
-    if ($postInstalledSDKs) {
-        Write-Log "SDKs After: $($postInstalledSDKs.Count)"
-    }
-    if ($preInstalledRuntimes) {
-        Write-Log "Runtimes Before: $($preInstalledRuntimes.Count)"
-    }
-    if ($postInstalledRuntimes) {
-        Write-Log "Runtimes After: $($postInstalledRuntimes.Count)"
-    }
-} catch {}
