@@ -1,12 +1,6 @@
-param(
-    [ValidateSet("True","False")]
-    [string]$RemoveUserData = "True"
-)
-
 $ErrorActionPreference = "SilentlyContinue"
 $ProgressPreference = "SilentlyContinue"
 $script:Failure = $false
-$removeUserDataEnabled = ($RemoveUserData -eq "True")
 $systemDrive = $env:SystemDrive
 $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
 $uninstallSubKeys = @(
@@ -14,14 +8,40 @@ $uninstallSubKeys = @(
     "Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
 )
 
+function Get-RegexReplacement {
+    param([string]$Value)
+
+    if (:IsNullOrWhiteSpace($Value)) {
+        return ""
+    }
+
+    return ($Value -replace '\$', '$$')
+}
+
 function Resolve-EnvPath {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [string]$ProfilePath
+    )
 
     if (:IsNullOrWhiteSpace($Path)) {
         return $null
     }
 
-    return :ExpandEnvironmentVariables($Path)
+    $resolvedPath = $Path
+
+    if (-not :IsNullOrWhiteSpace($ProfilePath)) {
+        $localAppData = Join-Path $ProfilePath "AppData\Local"
+        $roamingAppData = Join-Path $ProfilePath "AppData\Roaming"
+
+        $resolvedPath = $resolvedPath -ireplace :Escape("%USERPROFILE%"), (Get-RegexReplacement -Value $ProfilePath)
+        $resolvedPath = $resolvedPath -ireplace :Escape("%LOCALAPPDATA%"), (Get-RegexReplacement -Value $localAppData)
+        $resolvedPath = $resolvedPath -ireplace :Escape("%APPDATA%"), (Get-RegexReplacement -Value $roamingAppData)
+    }
+
+    $resolvedPath = $resolvedPath -ireplace :Escape("%SystemDrive%"), (Get-RegexReplacement -Value $systemDrive)
+
+    return :ExpandEnvironmentVariables($resolvedPath)
 }
 
 function Test-TargetPath {
@@ -58,6 +78,7 @@ function Test-VSCodeFolder {
     if (Test-Path -LiteralPath $codeExe -PathType Leaf) {
         try {
             $versionInfo = (Get-Item -LiteralPath $codeExe).VersionInfo
+
             if ($versionInfo.ProductName -like "*Visual Studio Code*" -or $versionInfo.FileDescription -like "*Visual Studio Code*") {
                 return $true
             }
@@ -101,7 +122,7 @@ function Split-UninstallCommand {
 function Stop-VSCodeProcesses {
     param([string]$InstallPath)
 
-    $normalized = $InstallPath.TrimEnd("\") + "\"
+    $normalizedInstallPath = $InstallPath.TrimEnd("\") + "\"
 
     Get-Process -Name "Code" | ForEach-Object {
         $processPath = $null
@@ -112,7 +133,7 @@ function Stop-VSCodeProcesses {
             $processPath = $null
         }
 
-        if ($processPath -and $processPath.StartsWith($normalized, [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($processPath -and $processPath.StartsWith($normalizedInstallPath, [System.StringComparison]::OrdinalIgnoreCase)) {
             try {
                 Stop-Process -Id $_.Id -Force
             } catch {
@@ -125,7 +146,8 @@ function Stop-VSCodeProcesses {
 function Invoke-VSCodeUninstallCommand {
     param(
         [string]$CommandLine,
-        [string]$InstallPath
+        [string]$InstallPath,
+        [string]$ProfilePath
     )
 
     $parsed = Split-UninstallCommand -CommandLine $CommandLine
@@ -134,7 +156,7 @@ function Invoke-VSCodeUninstallCommand {
         return $false
     }
 
-    $filePath = Resolve-EnvPath -Path $parsed.FilePath
+    $filePath = Resolve-EnvPath -Path $parsed.FilePath -ProfilePath $ProfilePath
 
     if (:IsNullOrWhiteSpace($filePath)) {
         return $false
@@ -186,7 +208,8 @@ function Invoke-VSCodeUninstallCommand {
 function Get-RegistryUninstallEntries {
     param(
         [string]$HiveName,
-        [string]$InstallPath
+        [string]$InstallPath,
+        [string]$ProfilePath
     )
 
     $entries = @()
@@ -202,9 +225,9 @@ function Get-RegistryUninstallEntries {
             $itemPath = $_.PSPath
             $props = Get-ItemProperty -LiteralPath $itemPath
             $displayName = [string]$props.DisplayName
-            $installLocation = Resolve-EnvPath -Path ([string]$props.InstallLocation)
-            $uninstallString = Resolve-EnvPath -Path ([string]$props.UninstallString)
-            $quietUninstallString = Resolve-EnvPath -Path ([string]$props.QuietUninstallString)
+            $installLocation = Resolve-EnvPath -Path ([string]$props.InstallLocation) -ProfilePath $ProfilePath
+            $uninstallString = Resolve-EnvPath -Path ([string]$props.UninstallString) -ProfilePath $ProfilePath
+            $quietUninstallString = Resolve-EnvPath -Path ([string]$props.QuietUninstallString) -ProfilePath $ProfilePath
             $matched = $false
 
             if ($displayName -match '^Microsoft Visual Studio Code' -or $displayName -match '^Visual Studio Code') {
@@ -240,7 +263,7 @@ function Remove-RegistryEntries {
     param($Entries)
 
     foreach ($entry in $Entries) {
-        if ($entry.RegistryPath) {
+        if ($entry.RegistryPath -and (Test-Path -LiteralPath $entry.RegistryPath)) {
             try {
                 Remove-Item -LiteralPath $entry.RegistryPath -Recurse -Force
             } catch {
@@ -250,49 +273,47 @@ function Remove-RegistryEntries {
     }
 }
 
-function Remove-InstallFolder {
+function Remove-KnownVSCodeAppArtifacts {
     param([string]$InstallPath)
 
     if (-not (Test-TargetPath -Path $InstallPath)) {
         return
     }
 
-    if (Test-Path -LiteralPath $InstallPath -PathType Container) {
-        try {
-            Remove-Item -LiteralPath $InstallPath -Recurse -Force
-        } catch {
-            Start-Sleep -Seconds 3
-
-            try {
-                Remove-Item -LiteralPath $InstallPath -Recurse -Force
-            } catch {
-                $script:Failure = $true
-            }
-        }
-    }
-}
-
-function Remove-VSCodeUserData {
-    param([string]$ProfilePath)
-
-    if (-not $removeUserDataEnabled) {
+    if (-not (Test-Path -LiteralPath $InstallPath -PathType Container)) {
         return
     }
 
-    if (:IsNullOrWhiteSpace($ProfilePath)) {
-        return
-    }
-
-    if (-not $ProfilePath.StartsWith("$systemDrive\Users\", [System.StringComparison]::OrdinalIgnoreCase)) {
-        return
-    }
-
-    $userDataTargets = @(
-        (Join-Path $ProfilePath "AppData\Roaming\Code"),
-        (Join-Path $ProfilePath ".vscode")
+    $knownItems = @(
+        "Code.exe",
+        "unins000.exe",
+        "unins000.dat",
+        "unins000.msg",
+        "bin",
+        "locales",
+        "policies",
+        "resources",
+        "tools",
+        "swiftshader",
+        "Code.VisualElementsManifest.xml",
+        "chrome_100_percent.pak",
+        "chrome_200_percent.pak",
+        "d3dcompiler_47.dll",
+        "ffmpeg.dll",
+        "icudtl.dat",
+        "libEGL.dll",
+        "libGLESv2.dll",
+        "resources.pak",
+        "snapshot_blob.bin",
+        "v8_context_snapshot.bin",
+        "vk_swiftshader.dll",
+        "vk_swiftshader_icd.json",
+        "vulkan-1.dll"
     )
 
-    foreach ($target in $userDataTargets) {
+    foreach ($item in $knownItems) {
+        $target = Join-Path $InstallPath $item
+
         if (Test-Path -LiteralPath $target) {
             try {
                 Remove-Item -LiteralPath $target -Recurse -Force
@@ -300,6 +321,16 @@ function Remove-VSCodeUserData {
                 $script:Failure = $true
             }
         }
+    }
+
+    try {
+        $remainingItems = Get-ChildItem -LiteralPath $InstallPath -Force
+
+        if (-not $remainingItems) {
+            Remove-Item -LiteralPath $InstallPath -Force
+        }
+    } catch {
+        $script:Failure = $true
     }
 }
 
@@ -309,7 +340,7 @@ function Get-UserProfiles {
     Get-ChildItem -LiteralPath $profileListPath | ForEach-Object {
         $sid = $_.PSChildName
         $props = Get-ItemProperty -LiteralPath $_.PSPath
-        $profilePath = Resolve-EnvPath -Path ([string]$props.ProfileImagePath)
+        $profilePath = Resolve-EnvPath -Path ([string]$props.ProfileImagePath) -ProfilePath $null
 
         if ($sid -match '^S-1-5-21-' -and $profilePath -and $profilePath.StartsWith("$systemDrive\Users\", [System.StringComparison]::OrdinalIgnoreCase)) {
             if (Test-Path -LiteralPath $profilePath -PathType Container) {
@@ -330,10 +361,6 @@ foreach ($profile in $profiles) {
     $installPath = Join-Path $profile.ProfilePath "AppData\Local\Programs\Microsoft VS Code"
 
     if (-not (Test-VSCodeFolder -Path $installPath)) {
-        if ($removeUserDataEnabled) {
-            Remove-VSCodeUserData -ProfilePath $profile.ProfilePath
-        }
-
         continue
     }
 
@@ -359,16 +386,12 @@ foreach ($profile in $profiles) {
     $entries = @()
 
     if (Test-Path -LiteralPath "Registry::HKEY_USERS\$hiveName") {
-        $entries = Get-RegistryUninstallEntries -HiveName $hiveName -InstallPath $installPath
+        $entries = Get-RegistryUninstallEntries -HiveName $hiveName -InstallPath $installPath -ProfilePath $profile.ProfilePath
     }
-
-    $uninstallAttempted = $false
 
     foreach ($entry in $entries) {
         if ($entry.QuietUninstallString) {
-            $uninstallAttempted = $true
-
-            if (Invoke-VSCodeUninstallCommand -CommandLine $entry.QuietUninstallString -InstallPath $installPath) {
+            if (Invoke-VSCodeUninstallCommand -CommandLine $entry.QuietUninstallString -InstallPath $installPath -ProfilePath $profile.ProfilePath) {
                 break
             }
         }
@@ -377,9 +400,7 @@ foreach ($profile in $profiles) {
     if (Test-Path -LiteralPath $installPath -PathType Container) {
         foreach ($entry in $entries) {
             if ($entry.UninstallString) {
-                $uninstallAttempted = $true
-
-                if (Invoke-VSCodeUninstallCommand -CommandLine $entry.UninstallString -InstallPath $installPath) {
+                if (Invoke-VSCodeUninstallCommand -CommandLine $entry.UninstallString -InstallPath $installPath -ProfilePath $profile.ProfilePath) {
                     break
                 }
             }
@@ -390,8 +411,6 @@ foreach ($profile in $profiles) {
         $uninsExe = Join-Path $installPath "unins000.exe"
 
         if (Test-Path -LiteralPath $uninsExe -PathType Leaf) {
-            $uninstallAttempted = $true
-
             try {
                 Start-Process -FilePath $uninsExe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL" -Wait -PassThru -WindowStyle Hidden | Out-Null
             } catch {
@@ -402,8 +421,10 @@ foreach ($profile in $profiles) {
     Start-Sleep -Seconds 3
 
     Remove-RegistryEntries -Entries $entries
-    Remove-InstallFolder -InstallPath $installPath
-    Remove-VSCodeUserData -ProfilePath $profile.ProfilePath
+
+    if (Test-Path -LiteralPath $installPath -PathType Container) {
+        Remove-KnownVSCodeAppArtifacts -InstallPath $installPath
+    }
 
     if ($loadedByScript) {
         :Collect()
@@ -412,18 +433,10 @@ foreach ($profile in $profiles) {
         Start-Process -FilePath "$env:SystemRoot\System32\reg.exe" -ArgumentList @("unload", "HKU\$hiveName") -Wait -PassThru -WindowStyle Hidden | Out-Null
     }
 
-    if (Test-Path -LiteralPath $installPath -PathType Container) {
-        $remainingItems = Get-ChildItem -LiteralPath $installPath -Force
+    $codeExeCheck = Join-Path $installPath "Code.exe"
 
-        if ($remainingItems) {
-            $script:Failure = $true
-        } else {
-            try {
-                Remove-Item -LiteralPath $installPath -Force
-            } catch {
-                $script:Failure = $true
-            }
-        }
+    if (Test-Path -LiteralPath $codeExeCheck -PathType Leaf) {
+        $script:Failure = $true
     }
 }
 
