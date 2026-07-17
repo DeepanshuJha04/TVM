@@ -11,7 +11,7 @@ $uninstallSubKeys = @(
 function Get-RegexReplacement {
     param([string]$Value)
 
-    if (:IsNullOrWhiteSpace($Value)) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
         return ""
     }
 
@@ -24,30 +24,30 @@ function Resolve-EnvPath {
         [string]$ProfilePath
     )
 
-    if (:IsNullOrWhiteSpace($Path)) {
+    if ([string]::IsNullOrWhiteSpace($Path)) {
         return $null
     }
 
     $resolvedPath = $Path
 
-    if (-not :IsNullOrWhiteSpace($ProfilePath)) {
+    if (-not [string]::IsNullOrWhiteSpace($ProfilePath)) {
         $localAppData = Join-Path $ProfilePath "AppData\Local"
         $roamingAppData = Join-Path $ProfilePath "AppData\Roaming"
 
-        $resolvedPath = $resolvedPath -ireplace :Escape("%USERPROFILE%"), (Get-RegexReplacement -Value $ProfilePath)
-        $resolvedPath = $resolvedPath -ireplace :Escape("%LOCALAPPDATA%"), (Get-RegexReplacement -Value $localAppData)
-        $resolvedPath = $resolvedPath -ireplace :Escape("%APPDATA%"), (Get-RegexReplacement -Value $roamingAppData)
+        $resolvedPath = $resolvedPath -ireplace [regex]::Escape("%USERPROFILE%"), (Get-RegexReplacement -Value $ProfilePath)
+        $resolvedPath = $resolvedPath -ireplace [regex]::Escape("%LOCALAPPDATA%"), (Get-RegexReplacement -Value $localAppData)
+        $resolvedPath = $resolvedPath -ireplace [regex]::Escape("%APPDATA%"), (Get-RegexReplacement -Value $roamingAppData)
     }
 
-    $resolvedPath = $resolvedPath -ireplace :Escape("%SystemDrive%"), (Get-RegexReplacement -Value $systemDrive)
+    $resolvedPath = $resolvedPath -ireplace [regex]::Escape("%SystemDrive%"), (Get-RegexReplacement -Value $systemDrive)
 
-    return :ExpandEnvironmentVariables($resolvedPath)
+    return [System.Environment]::ExpandEnvironmentVariables($resolvedPath)
 }
 
 function Test-TargetPath {
     param([string]$Path)
 
-    if (:IsNullOrWhiteSpace($Path)) {
+    if ([string]::IsNullOrWhiteSpace($Path)) {
         return $false
     }
 
@@ -57,7 +57,7 @@ function Test-TargetPath {
         return $false
     }
 
-    $pattern = ("^{0}\\Users\\[^\\]+\\AppData\\Local\\Programs\\Microsoft VS Code$" -f :Escape($systemDrive))
+    $pattern = ("^{0}\\Users\\[^\\]+\\AppData\\Local\\Programs\\Microsoft VS Code$" -f [regex]::Escape($systemDrive))
     return ($fullPath -match $pattern)
 }
 
@@ -96,7 +96,7 @@ function Test-VSCodeFolder {
 function Split-UninstallCommand {
     param([string]$CommandLine)
 
-    if (:IsNullOrWhiteSpace($CommandLine)) {
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) {
         return $null
     }
 
@@ -158,7 +158,7 @@ function Invoke-VSCodeUninstallCommand {
 
     $filePath = Resolve-EnvPath -Path $parsed.FilePath -ProfilePath $ProfilePath
 
-    if (:IsNullOrWhiteSpace($filePath)) {
+    if ([string]::IsNullOrWhiteSpace($filePath)) {
         return $false
     }
 
@@ -175,21 +175,9 @@ function Invoke-VSCodeUninstallCommand {
     $arguments = [string]$parsed.Arguments
 
     if ($filePath -match 'unins\d*\.exe$') {
-        if ($arguments -notmatch '/VERYSILENT' -and $arguments -notmatch '/SILENT') {
-            $arguments = "$arguments /VERYSILENT"
-        }
-
-        if ($arguments -notmatch '/SUPPRESSMSGBOXES') {
-            $arguments = "$arguments /SUPPRESSMSGBOXES"
-        }
-
-        if ($arguments -notmatch '/NORESTART') {
-            $arguments = "$arguments /NORESTART"
-        }
-
-        if ($arguments -notmatch '/NOCANCEL') {
-            $arguments = "$arguments /NOCANCEL"
-        }
+        $silentSwitchPattern = '/VERYSILENT|/SILENT|/SUPPRESSMSGBOXES|/NORESTART|/NOCANCEL|/NORESTARTAPPLICATIONS'
+        $arguments = ($arguments -split '\s+' | Where-Object { $_ -and ($_ -notmatch $silentSwitchPattern) }) -join ' '
+        $arguments = "$arguments /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL".Trim()
     }
 
     try {
@@ -427,8 +415,8 @@ foreach ($profile in $profiles) {
     }
 
     if ($loadedByScript) {
-        :Collect()
-        :WaitForPendingFinalizers()
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
         Start-Sleep -Seconds 2
         Start-Process -FilePath "$env:SystemRoot\System32\reg.exe" -ArgumentList @("unload", "HKU\$hiveName") -Wait -PassThru -WindowStyle Hidden | Out-Null
     }
