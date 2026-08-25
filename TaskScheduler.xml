@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+
+  <RegistrationInfo>
+    <Date>2026-06-04T00:00:00</Date>
+    <Author>Network SCCM Automation</Author>
+    <Description>Run SCCM ClientAlwaysOnInternet script every 5 minutes</Description>
+  </RegistrationInfo>
+
+    <Triggers>
+
+  <!-- Every 5 Minutes Trigger -->
+  <TimeTrigger>
+    <Enabled>true</Enabled>
+    <StartBoundary>2026-06-04T00:00:00</StartBoundary>
+    <Repetition>
+      <Interval>PT5M</Interval>
+      <Duration>P9999D</Duration>
+      <StopAtDurationEnd>false</StopAtDurationEnd>
+    </Repetition>
+  </TimeTrigger>
+
+  <!-- Network Change Trigger -->
+  <EventTrigger>
+    <Enabled>true</Enabled>
+    <Subscription>
+      <![CDATA[
+      <QueryList>
+        <Query Id="0" Path="Microsoft-Windows-NetworkProfile/Operational">
+          <Select Path="Microsoft-Windows-NetworkProfile/Operational">
+  		*[System[(EventID=10000)]]
+	</Select>
+        </Query>
+      </QueryList>
+      ]]>
+    </Subscription>
+  </EventTrigger>
+
+</Triggers>
+
+<Principals>
+  <Principal id="Author">
+    <UserId>SYSTEM</UserId>
+    <RunLevel>HighestAvailable</RunLevel>
+  </Principal>
+</Principals>
+
+
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>
+        -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\AlwaysInternet\ClientAlwaysOnInternet.ps1"
+      </Arguments>
+    </Exec>
+  </Actions>
+
+</Task>
