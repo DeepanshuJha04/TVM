@@ -44,15 +44,7 @@ powershell.exe -Command "& { & '.\Deploy-Application.ps1' -DeployMode 'Silent'; 
 
 .EXAMPLE
 
-powershell.exe -Command "& { & '.\Deploy-Application.ps1' -AllowRebootPassThru; Exit $LastExitCode }"
-
-.EXAMPLE
-
-powershell.exe -Command "& { & '.\Deploy-Application.ps1' -DeploymentType 'Uninstall'; Exit $LastExitCode }"
-
-.EXAMPLE
-
-Deploy-Application.exe -DeploymentType "Install" -DeployMode "Silent"
+powershell.exe -Command "& { & '.\Deploy-Application.ps1' -DeploymentType 'Uninstall' -DeployMode 'Silent'; Exit $LastExitCode }"
 
 .INPUTS
 
@@ -67,6 +59,17 @@ None
 This script does not generate any output.
 
 .NOTES
+
+Deploys the twice-monthly Automated .NET Cleanup scheduled task.
+
+- Installs:  C:\Automated_dotNET_Cleanup\dotNET_Cleanup.ps1
+             C:\Automated_dotNET_Cleanup\SCCM-DotNETCleanup-Task.xml   (kept for reference/audit)
+             C:\Automated_dotNET_Cleanup\Files\dotnet-core-uninstall.msi
+- Registers: Scheduled task \Custom\Automated_dotNET_Cleanup from the XML
+             (fires 1st & 15th of every month, silently, as SYSTEM;
+             StartWhenAvailable means a missed run fires automatically
+             the next time the device is back online)
+- Uninstalls: unregisters the task and deletes C:\Automated_dotNET_Cleanup\ entirely
 
 Toolkit Exit Code Ranges:
 - 60000 - 68999: Reserved for built-in exit codes in Deploy-Application.ps1, Deploy-Application.exe, and AppDeployToolkitMain.ps1
@@ -114,11 +117,8 @@ Try {
     [String]$appLang = 'EN'
     [String]$appRevision = '01'
     [String]$appScriptVersion = '1.0.0'
-    [String]$appScriptDate = '14/09/2026'
+    [String]$appScriptDate = '15/09/2026'
     [String]$appScriptAuthor = 'HCL APF'
-    [String]$sourceFolder = 'C:\Windows\'							  
-	[String]$logFolder = $sourceFolder+'logs\'
-    [String]$logFile = ''
     ##*===============================================
     ## Variables: Install Titles (Only set here to override defaults set by the toolkit)
     [String]$installName = 'Automatic_Removal_of_Obsolete_EOL_Unapproved_dotNET_Components_TSKSCH'
@@ -171,7 +171,6 @@ Try {
             Exit $mainExitCode
         }
     }
-    
 
     #endregion
     ##* Do not modify section above
@@ -179,87 +178,62 @@ Try {
     ##* END VARIABLE DECLARATION
     ##*===============================================
 
-    If ($deploymentType -ine 'Uninstall' -and $deploymentType -ine 'Repair') {
-        ##*===============================================
-        ##* PRE-INSTALLATION
-        ##*===============================================
-        [String]$installPhase = 'Pre-Installation'
+    ##*===============================================
+    ##* DEPLOYMENT-SPECIFIC VARIABLES
+    ##*===============================================
+    ## $dirFiles is set by AppDeployToolkitMain.ps1 to "<script folder>\Files"
+    [String]$dotNetScriptName  = 'dotNET_Cleanup.ps1'
+    [String]$taskXmlName       = 'SCCM-DotNETCleanup-Task.xml'
+    [String]$uninstallMsiName  = 'dotnet-core-uninstall.msi'
+    [String]$installDir        = 'C:\Automated_dotNET_Cleanup'
+    [String]$taskName          = 'Automated_dotNET_Cleanup'
+    [String]$taskFolderName    = 'Custom'
+    [String]$taskFolderPath    = "\$taskFolderName\"
 
-        ## Show Welcome Message, close Internet Explorer if required, allow up to 3 deferrals, verify there is enough disk space to complete the install, and persist the prompt
-        #Show-InstallationWelcome -CloseApps 'iexplore' -AllowDefer -DeferTimes 3 -CheckDiskSpace -PersistPrompt
+    ## dotnet-core-uninstall.msi sits alone directly in \Files, which would
+    ## otherwise trigger PSADT's zero-config MSI auto-install (it treats a
+    ## lone MSI in \Files as "the application" and silently installs it via
+    ## Execute-MSI). That MSI is a supporting tool consumed later by
+    ## dotNET_Cleanup.ps1, not the thing being deployed here, so zero-config
+    ## handling is explicitly disabled.
+    $useDefaultMsi = $false
 
-        ## Show Progress Message (with the default message)
-        ##Show-InstallationProgress
+    ##*===============================================
+    ##* DEPLOYMENT FUNCTIONS
+    ##*===============================================
+    Function Install-DotNetCleanupPackage {
+        $sourceScript = Join-Path $dirFiles $dotNetScriptName
+        $sourceXml    = Join-Path $dirFiles $taskXmlName
+        $sourceMsi    = Join-Path $dirFiles $uninstallMsiName
 
-        ##If(Get-InstalledApplication -ProductCode '{AC76BA86-7AD7-1033-7B44-AC0F074E4100}')
-        ##{
-         ##Execute-MSI -Action Uninstall -Path '{AC76BA86-7AD7-1033-7B44-AC0F074E4100}'
-        ##}
+        If (-not (Test-Path -LiteralPath $sourceScript)) { Throw "Missing: $sourceScript" }
+        If (-not (Test-Path -LiteralPath $sourceXml))    { Throw "Missing: $sourceXml" }
+        If (-not (Test-Path -LiteralPath $sourceMsi))    { Throw "Missing required file: $sourceMsi" }
 
-        ## <Perform Pre-Installation tasks here>
-        
-
-        ##*===============================================
-        ##* INSTALLATION
-        ##*===============================================
-        [String]$installPhase = 'Installation'
-
-        ## Handle Zero-Config MSI Installations
-        If ($useDefaultMsi) {
-            [Hashtable]$ExecuteDefaultMSISplat = @{ Action = 'Install'; Path = $defaultMsiFile }; If ($defaultMstFile) {
-                $ExecuteDefaultMSISplat.Add('Transform', $defaultMstFile)
-            }
-            Execute-MSI @ExecuteDefaultMSISplat; If ($defaultMspFiles) {
-                $defaultMspFiles | ForEach-Object { Execute-MSI -Action 'Patch' -Path $_ }
-            }
+        ## Step 1: Create destination folder
+        If (-not (Test-Path -LiteralPath $installDir)) {
+            New-Item -Path $installDir -ItemType Directory -Force | Out-Null
         }
 
+        ## Step 2: Copy files (unmodified). The MSI goes into a Files\
+        ## subfolder on the endpoint too, matching what dotNET_Cleanup.ps1
+        ## expects relative to itself.
+        Copy-Item -LiteralPath $sourceScript -Destination (Join-Path $installDir $dotNetScriptName) -Force
+        Copy-Item -LiteralPath $sourceXml -Destination (Join-Path $installDir $taskXmlName) -Force
 
-        ## <Perform Installation tasks here>
+        $destFilesDir = Join-Path $installDir 'Files'
+        If (-not (Test-Path -LiteralPath $destFilesDir)) {
+            New-Item -Path $destFilesDir -ItemType Directory -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $sourceMsi -Destination (Join-Path $destFilesDir $uninstallMsiName) -Force
 
-        $SourceRoot       = "$Dirfiles\"
-        $InstallDir       = "C:\Automated_dotNET_Cleanup"
-        $ScriptFileName   = "dotNET_Cleanup.ps1"
-        $XmlFileName      = "SCCM-DotNETCleanup-Task.xml"
-        $FilesFolderName  = "Files"
-        $UninstallMsiName = "dotnet-core-uninstall.msi"
-        $TaskName         = "Automated_dotNET_Cleanup"
-        $TaskFolderName   = "Custom"
-        $TaskFolderPath   = "\$TaskFolderName\"
-        
-        $sourceScript = Join-Path $SourceRoot $ScriptFileName
-        $sourceXml    = Join-Path $SourceRoot $XmlFileName
-        $sourceFiles  = Join-Path $SourceRoot $FilesFolderName
-        $sourceMsi    = Join-Path $sourceFiles $UninstallMsiName
-
-        if (-not (Test-Path -LiteralPath $sourceScript)) { throw "Missing: $sourceScript" }
-        if (-not (Test-Path -LiteralPath $sourceXml))    { throw "Missing: $sourceXml" }
-        if (-not (Test-Path -LiteralPath $sourceFiles))  { throw "Missing: $sourceFiles" }
-        if (-not (Test-Path -LiteralPath $sourceMsi))    { throw "Missing required file: $sourceMsi" }
-
-        # Step 1: Create destination folder
-        if (-not (Test-Path -LiteralPath $InstallDir)) {
-            New-Item -Path $InstallDir -ItemType Directory -Force | Out-Null
+        If (-not (Test-Path -LiteralPath (Join-Path $destFilesDir $uninstallMsiName))) {
+            Throw "$uninstallMsiName failed to copy to $destFilesDir"
         }
 
-        # Step 2: Copy files (unmodified), preserving Files\ subfolder structure
-        Copy-Item -LiteralPath $sourceScript -Destination (Join-Path $InstallDir $ScriptFileName) -Force
-        Copy-Item -LiteralPath $sourceXml -Destination (Join-Path $InstallDir $XmlFileName) -Force
-
-        $destFiles = Join-Path $InstallDir $FilesFolderName
-        if (-not (Test-Path -LiteralPath $destFiles)) {
-            New-Item -Path $destFiles -ItemType Directory -Force | Out-Null
-        }
-        Copy-Item -Path (Join-Path $sourceFiles '*') -Destination $destFiles -Recurse -Force
-
-        # Confirm the mandatory MSI actually landed on disk
-        if (-not (Test-Path -LiteralPath (Join-Path $destFiles $UninstallMsiName))) {
-            throw "dotnet-core-uninstall.msi failed to copy to $destFiles"
-        }
-
-        # Step 3: Harden NTFS permissions - Admins/SYSTEM full control,
-        # standard users read & execute only (no tampering, no deletion)
-        $acl = Get-Acl -LiteralPath $InstallDir
+        ## Step 3: Harden NTFS permissions - Admins/SYSTEM full control,
+        ## standard users read & execute only (no tampering, no deletion)
+        $acl = Get-Acl -LiteralPath $installDir
         $acl.SetAccessRuleProtection($true, $false)
         $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
         @(
@@ -267,414 +241,88 @@ Try {
             New-Object System.Security.AccessControl.FileSystemAccessRule('BUILTIN\Administrators', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
             New-Object System.Security.AccessControl.FileSystemAccessRule('BUILTIN\Users', 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
         ) | ForEach-Object { $acl.AddAccessRule($_) }
-        Set-Acl -LiteralPath $InstallDir -AclObject $acl
+        Set-Acl -LiteralPath $installDir -AclObject $acl
 
-        # Step 4: Register the scheduled task from XML
-        $xmlContent = Get-Content -LiteralPath (Join-Path $InstallDir $XmlFileName) -Raw -Encoding Unicode
-        if ([string]::IsNullOrWhiteSpace($xmlContent)) {
-            $xmlContent = Get-Content -LiteralPath (Join-Path $InstallDir $XmlFileName) -Raw
+        ## Step 4: Register the scheduled task from XML
+        $xmlContent = Get-Content -LiteralPath (Join-Path $installDir $taskXmlName) -Raw -Encoding Unicode
+        If ([string]::IsNullOrWhiteSpace($xmlContent)) {
+            $xmlContent = Get-Content -LiteralPath (Join-Path $installDir $taskXmlName) -Raw
         }
-        Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskFolderPath -Xml $xmlContent -Force | Out-Null
+        Register-ScheduledTask -TaskName $taskName -TaskPath $taskFolderPath -Xml $xmlContent -Force | Out-Null
 
-        if (-not (Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskFolderPath -ErrorAction SilentlyContinue)) {
-            throw "Task registration did not take effect"
+        If (-not (Get-ScheduledTask -TaskName $taskName -TaskPath $taskFolderPath -ErrorAction SilentlyContinue)) {
+            Throw 'Task registration did not take effect'
         }
-Try{   
-    
-        ## EXECUTE-MSI (INSTALLATION)
-        ## Executes msiexec.exe to perform the following actions for MSI & MSP files and MSI product codes: install, uninstall, patch, repair, active setup.
-        ## Example: Execute-MSI  -Action 'Install' -Path "$Dirfiles\XXXXX.msi" -Transform "$Dirfiles\XXXXX.mst" -Parameters ""
-        #WriteLogFile " $installPhase : $appName installation started"
-        #$ReturnCode = Execute-MSI -Action 'Install' -Path "$Dirfiles\XXXXX.msi" -Parameters "ALLUSERS=1 /l*v $logFolder$appPkgName_$installPhase.log REBOOT=ReallySuppress /qn" -PassThru
-        #$ExitCode = $ReturnCode.ExitCode
-        #WriteLogFile " $installPhase : $appName installation completed with exit code: $ExitCode"
-
-        ## EXECUTE-PROCESS (INSTALLATION)
-        ## Execute a process with optional arguments, working directory, window style.
-        ## Example: Execute-Process -Path "$Dirfiles\setup.exe" -Parameters '/S' -WindowStyle 'Hidden'
-
-
-}
-
-Catch
-{
-        #WriteLogFile "Installation is failed with exit code :$ExitCode" -Source 'Installation'
-       # $ExitCode = $ReturnCode.ExitCode
-       # exit-script -Exitcode $ExitCode
-}
-
-
-        ##*===============================================
-        ##* POST-INSTALLATION
-        ##*===============================================
-       [String]$installPhase = 'Post-Installation'
-
-        ## <Perform Post-Installation tasks here>
-
-         
-         
-Try{  
-        ## IMPORT REG-FILE
-		## Example: Execute-Process -FilePath “reg.exe” -Parameters “import $dirSupportFiles\test.reg” -PassThru
-		# WriteLogFile " $installPhase : Import REG-File"
-		# Execute-Process -FilePath “reg.exe” -Parameters “import $dirFile\test.reg” -PassThru
-        
-		## SET-REGISTRYKEY
-		## Creates a registry key name, value, and value data; it sets the same if it already exists.
-		## Example: Set-RegistryKey -Key 'HKEY_LOCAL_MACHINE\SOFTWARE' -Name 'Application' -Type 'Dword' -Value '1'
-		# WriteLogFile " $installPhase : Set REG-Key"
-		# Set-RegistryKey [-Key] <String> [[-Name] <String>] [[-Value] <Object>] [[-Type] {Unknown | String | ExpandString | Binary | DWord | MultiString | QWord | None}] [[-SID] <String>]
-
-		## INVOKE-HKCUREGISTRYSETTINGSFORALLUSERS
-		## Set current user registry settings for all current users and any new users in the future
-		## Example: Set-RegistryKey -Key 'HKCU\Software\Microsoft\Office\14.0\Common' -Name 'qmenable' -Value 0 -Type DWord -SID $UserProfile.SID
-		# WriteLogFile " $installPhase : Invoke HKCU for all users"
-		# $HKCURegistrySettings = {Set-RegistryKey -Key 'HKCU\Software\Microsoft\Office\14.0\Common' -Name 'qmenable' -Value '0' -Type 'DWord' -SID $UserProfile.SID}
-		# Invoke-HKCURegistrySettingsForAllUsers -RegistrySettings $HKCURegistrySettings
-
-		## COPY-FILE
-		## Copy a file or group of files to a destination path.
-		## Example: Copy-File -Path "$dirSupportFiles\MyApp.ini" -Destination "$envWindir\MyApp.ini"
-		# WriteLogFile " $installPhase : Copy File"
-		# Copy-File "$Dirfiles\<Filename>" -Destination "<Path\Filename>"
-
-        <# or 
-        $ProfilePaths = Get-UserProfiles | Select-Object -ExpandProperty 'ProfilePath'
-        ForEach ($Path in $ProfilePaths)
-        {
-            $testPath = Test-Path "$Path\AppData\Roaming\Notepad++"
-            if ($testpath)
-            {
-              Copy-File -path "$dirFiles\config.xml" -destination "$path\AppData\Roaming\Notepad++\config.xml" -Recurse
-            }
-            else{
-               New-Item -ItemType Directory -Force -Path "$path\AppData\Roaming\Notepad++"
-               Copy-File -path "$dirFiles\config.xml" -destination "$path\AppData\Roaming\Notepad++\config.xml" -Recurse
-                }
-	    }#>
-        
-        
-
-        
-        
-
-        ## COPY-FOLDER
-        
-
-
-		## CREATE FIREWALL-RULE
-		## Example: New-NetFirewallRule -DisplayName "Allow Authenticated Messenger" -Direction Inbound -Program "C:\Program Files (x86)\Messenger\msmsgs.exe" -Profile Domain -Action Allow
-		# WriteLogFile " $installPhase : Windows Firewall"
-		# New-NetFirewallRule -DisplayName "" -Direction Inbound -Program "" -Profile Domain -Action Allow
-
-		## DELETE-DESKTOP-SHORTCUT
-		## Remove unneeded Desktop Shortcut
-		## Example: Remove-Item -Path "$env:PUBLIC\desktop\xxx.lnk"
-		# WriteLogFile " $installPhase : Delete Shortcut"
-		# Remove-Item -Path "$env:PUBLIC\desktop\xxx.lnk"
-
-        <#    OR
-
-        $FileToCheck =	"$EnvPublic\Desktop\Autodesk Desktop App.lnk"
-		If (Test-Path $FileToCheck){
-			Remove-File -path "$EnvPublic\Desktop\Autodesk Desktop App.lnk"
-			}
-
-        $FileToCheck = "$EnvProgramData\Microsoft\Windows\Start Menu\Programs\Autodesk\Uninstall Tool.lnk"
-		If (Test-Path $FileToCheck){
-			Remove-File -path "$EnvProgramData\Microsoft\Windows\Start Menu\Programs\Autodesk\Uninstall Tool.lnk"
-			}
-
-        #>
-
-        ## REMOVE-FILE
-        ## Removes one or more items from a given path on the filesystem.
-        ## Example: 'C:\Windows\Downloaded Program Files\Temp.inf'
-        # if (Test-Path -Path "C:\PATH") {
-		#    WriteLogFile " $installPhase : Remove File"
-        #    Remove-File [-Path] <String> [[-ContinueOnError] <Boolean>] [<CommonParameters>]
-        # }
-
-        ## REMOVE-FOLDER
-        ## Remove folder and files if they exist.
-        ## Example: Remove-Folder -Path "$envWinDir\Downloaded Program Files"
-        # if (Test-Path -Path "C:\PATH") {
-		#    WriteLogFile " $installPhase : Remove Folder"
-        #    Remove-Folder [-Path] <String> [[-ContinueOnError] <Boolean>] [<CommonParameters>]
-        #    Remove-Folder -Path "$env:ProgramFiles\Notepad++"
-        # }
-
-        <#  or
-        $ProfilePaths = Get-UserProfiles | Select-Object -ExpandProperty 'ProfilePath'
-        ForEach ($Path in $ProfilePaths) {
-        $testPath = Test-Path "$Path\AppData\Roaming\Notepad++"
-        if ($testpath)
-        {
-        Remove-Folder -Path "$path\AppData\Roaming\Notepad++" -ContinueOnError $true   
-        }
-	    }  
-        #>
-
-		## EXECUTE-PROCESSASUSER
-		## Execute a process with a logged in user account, by using a scheduled task, to provide interaction with user in the SYSTEM context.
-		## Example: Execute-ProcessAsUser -Path "$PSHOME\powershell.exe" -Parameters "-Command & { & `"C:\Test\Script.ps1`"; Exit `$LastExitCode }" -Wait
-		# WriteLogFile " $installPhase : Execute Process as User"
-		# Execute-ProcessAsUser [[-UserName] <String>] [-Path] <String> [[-Parameters] <String>] [-SecureParameters] [[-RunLevel] <String>] [-Wait] [-PassThru] [[-ContinueOnError] <Boolean>]
-        
-		## SET-ITEMPERMISSION
-		## Allow you to easily change permissions on files or folders
-		## Example: Set-ItemPermission -Path "C:\Temp" -User "DOMAIN\John", "BUILTIN\Utilisateurs" -Permission FullControl -Inheritance ObjectInherit,ContainerInherit
-		# $Path = 'C:\FOLDERNAME'
-		# WriteLogFile " $installPhase : Set-Permission for Path: $Path"
-		# Set-ItemPermission -Path "$Path" -User "BUILTIN\Users" -Permission FullControl -Inheritance ObjectInherit,ContainerInherit -Method Add
-        # Execute-Process -Path "$envSystem32Directory\iCacls.exe" -Parameters """$envProgramFilesX86\Adobe\test 2.1.5.0"" /Q /grant:r Users:(OI)(CI)M"
-
-        ##DRIVERS INSTALL:
-       
-       #DPINST:
-        #Execute-Process -Path "$dirFiles\driver\64\eng\DPInst.exe" -Parameters "/U `"$envWinDir\System32\DriverStore\FileRepository\brprca80.inf_amd64_fb43851a75d52d81\brprca80.inf`" /S"
-
-       #PNPUTIL UTILITY:
-        #Execute-Process -Path "$envWinDir\System32\pnputil.exe" -Parameters "/add-driver `"$dirFiles\driver\64\eng\*.inf`" /install"
-
-           
-        #Certificate INSTALL
-         #Execute-Process -Path "certutil.exe" -Parameters "-f -addstore Root `"$dirFiles\File.cer`""	
-        
-        #IMport certificate:
-        #Import-Certificate -Filepath "$dirFiles\File.cer" -CertStoreLocation cert:\LocalMachine\Root
-
-
-       ## WriteLogFile "installation completed successfully"
-        ##writeLogFile "------------------------------------------------------------------------------"
-}
-
-
-Catch
-{
-      ##WriteLogFile "Post-Installation is failed with exit code :$ExitCode" -Source 'Installation'
-     ## $ExitCode = $ReturnCode.ExitCode
-     ## exit-script -Exitcode $ExitCode
-}
     }
 
+    Function Uninstall-DotNetCleanupPackage {
+        ## Step 1: Remove the scheduled task
+        $task = Get-ScheduledTask -TaskName $taskName -TaskPath $taskFolderPath -ErrorAction SilentlyContinue
+        If ($task) {
+            Unregister-ScheduledTask -TaskName $taskName -TaskPath $taskFolderPath -Confirm:$false
+        }
+
+        ## Step 2: Remove the \Custom task folder if it's now empty
+        Try {
+            $service = New-Object -ComObject 'Schedule.Service'
+            $service.Connect()
+            $folder = $service.GetFolder("\$taskFolderName")
+            If (($folder.GetTasks(0) | Measure-Object).Count -eq 0) {
+                $service.GetFolder('\').DeleteFolder($taskFolderName, 0)
+            }
+        }
+        Catch {
+            ## Folder already gone or never existed - not fatal
+        }
+
+        ## Step 3: Remove the local copy entirely (clean slate for re-deployment)
+        If (Test-Path -LiteralPath $installDir) {
+            Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction Stop
+        }
+    }
+
+    If ($deploymentType -ine 'Uninstall' -and $deploymentType -ine 'Repair') {
+        ##*===============================================
+        ##* INSTALLATION
+        ##*===============================================
+        [String]$installPhase = 'Installation'
+
+        Try {
+            Install-DotNetCleanupPackage
+        }
+        Catch {
+            [Int32]$mainExitCode = 69001
+            Throw
+        }
+    }
     ElseIf ($deploymentType -ieq 'Uninstall') {
-        ##*===============================================
-        ##* PRE-UNINSTALLATION
-        ##*===============================================
-        [String]$installPhase = 'Pre-Uninstallation'
-
-        ## Show Welcome Message, close Internet Explorer with a 60 second countdown before automatically closing
-        
-
-        ## Show Progress Message (with the default message)
-        ##Show-InstallationProgress
-
-        ## <Perform Pre-Uninstallation tasks here>
-        
-        
-        
         ##*===============================================
         ##* UNINSTALLATION
         ##*===============================================
         [String]$installPhase = 'Uninstallation'
 
-        ## Handle Zero-Config MSI Uninstallations
-        If ($useDefaultMsi) {
-            [Hashtable]$ExecuteDefaultMSISplat = @{ Action = 'Uninstall'; Path = $defaultMsiFile }; If ($defaultMstFile) {
-                $ExecuteDefaultMSISplat.Add('Transform', $defaultMstFile)
-            }
-            Execute-MSI @ExecuteDefaultMSISplat
+        Try {
+            Uninstall-DotNetCleanupPackage
         }
-
-        ## <Perform Uninstallation tasks here>
-        # Step 1: Remove the scheduled task
-        $task = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskFolderPath -ErrorAction SilentlyContinue
-        if ($task) {
-            Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskFolderPath -Confirm:$false
+        Catch {
+            [Int32]$mainExitCode = 69002
+            Throw
         }
-
-        # Step 2: Remove the \Custom task folder if it's now empty
-        try {
-            $service = New-Object -ComObject 'Schedule.Service'
-            $service.Connect()
-            $folder = $service.GetFolder("\$TaskFolderName")
-            if (($folder.GetTasks(0) | Measure-Object).Count -eq 0) {
-                $service.GetFolder('\').DeleteFolder($TaskFolderName, 0)
-            }
-        }
-        catch {
-            # Folder already gone or never existed - not fatal
-        }
-
-        # Step 3: Remove the local copy entirely (clean slate for re-deployment)
-        if (Test-Path -LiteralPath $InstallDir) {
-            Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction Stop
-        }
-        
-        
-        
-
-Try{
-        ## Executes msiexec.exe to perform the following actions for MSI & MSP files and MSI product codes: install, uninstall, patch, repair, active setup.
-        ## Example: Execute-MSI  -Action 'Install' -Path "$Dirfiles\XXXXX.msi" -Tansform "$Dirfiles\XXXXX.mst" -Parameters "ALLUSERS=1 /l*v $logFolder$appPkgName"
-        # WriteLogFile " $installPhase : $appName uninstallation started"
-        # $ReturnCode = Execute-MSI -Action 'Uninstall' -Path "$MSIProductCode" -Parameters "/l*v $logFolder$appPkgName_$installPhase.log REBOOT=ReallySuppress /qn" -PassThru
-        # $ExitCode = $ReturnCode.ExitCode
-        # WriteLogFile " $installPhase : $appName uninstallation completed with exit code: $ExitCode"
-
-        ## EXECUTE-PROCESS (UNINSTALL)
-        ## Execute a process with optional arguments, working directory, window style.
-        ## Example: Execute-Process -Path "C:\Program Files (x86)\xxxx\uninst.exe" -Parameters '/S' -WindowStyle 'Hidden'
-
-      
-                
-}
-
-  
-Catch
-{
-     ## WriteLogFile "unInstallation is failed with exit code :$ExitCode" -Source 'unInstallation'
-     ## $ExitCode = $ReturnCode.ExitCode
-      ##exit-script -Exitcode $ExitCode
-}
-        ##*===============================================
-        ##* POST-UNINSTALLATION
-        ##*===============================================
-        [String]$installPhase = 'Post-Uninstallation'
-
-        ## <Perform Post-Uninstallation tasks here>
-
-          
-Try{
-		
-        ## REMOVE-FILE
-        ## Removes one or more items from a given path on the filesystem.
-        ## Example: 'C:\Windows\Downloaded Program Files\Temp.inf'
-        # if (Test-Path -Path "C:\PATH") {
-		#    WriteLogFile " $installPhase : Remove File"
-        #    Remove-File [-Path] <String> [[-ContinueOnError] <Boolean>] [<CommonParameters>]
-        # }
-
-        ## REMOVE-FOLDER
-        ## Remove folder and files if they exist.
-        ## Example: Remove-Folder -Path "$envWinDir\Downloaded Program Files"
-        # if (Test-Path -Path "C:\PATH") {
-		#    WriteLogFile " $installPhase : Remove Folder"
-        #    Remove-Folder [-Path] <String> [[-ContinueOnError] <Boolean>] [<CommonParameters>]
-        #    Remove-Folder -Path "$env:ProgramFiles\Notepad++"
-        # }
-
-        <#  or #>
-        
-
-        ## REMOVE-EMPTY FOLDER
-        #$OfficeDIR = "$envProgramFiles\Microsoft Office"
-        #If( (Get-ChildItem "$OfficeDIR" | Measure-Object).Count -eq 0) { Remove-folder -path "$OfficeDIR" }
-
-        <#  OR
-        If( (Get-ChildItem "$envProgramFiles\Microsoft Office" | Measure-Object).Count -eq 0) { Remove-folder -path "$envProgramFiles\Microsoft Office" }
-        #>
-
-        
-        
-
-        ## REMOVE-REGISTRYKEY
-        ## Deletes the specified registry key or value.
-        ## Example: Remove-RegistryKey -Key 'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce'
-        # WriteLogFile " $installPhase : Remove Reg-Key"
-        # Remove-RegistryKey [-Key] <String> [[-Name] <String>] [-Recurse] [[-SID] <String>] [[-ContinueOnError] <Boolean>] [<CommonParameters>]
-
-        ## REMOVE-FIREWALL-RULE
-        ## Remove existing Firewall Rule.
-        ## Example: Remove-NetFirewallRule -DisplayName "<Rule Name>"
-        # WriteLogFile " $installPhase : Remove Firewall Rule"
-        # Remove-NetFirewallRule -DisplayName "RULE_NAME"
-
-        ## DELETE-DESKTOP-SHORTCUT
-        ## Remove unneeded Desktop Shortcut
-        ## Example: Remove-Item -Path "$env:PUBLIC\desktop\xxx.lnk"
-        # WriteLogFile " $installPhase : Delete Shortcut"
-        # Remove-Item -Path "$env:PUBLIC\desktop\xxx.lnk"
-
-        ##DRIVERS UNINSTALL:
-        
-        ##DPINST       
-         #Execute-Process -Path "$dirFiles\driver\64\eng\DPInst.exe" -Parameters "/U `"$envWinDir\System32\DriverStore\FileRepository\brprca80.inf_amd64_fb43851a75d52d81\brprca80.inf`" /S" 
-        
-        ##PNPUTIL UTILITY:
-         #Execute-Process -Path 'PnPutil.exe' -Parameters "/delete-driver `"$envWinDir\System32\DriverStore\FileRepository\ftdibus.inf_amd64_e2e1704048854979\ftdibus.INF`""
-
-        ##Remove Certificate:
-        #Execute-Process -Path "$envWinDir\System32\certutil.exe" -Parameters " -delstore CertificateNAME" -Passthru
-       
-       ## STOP-Service
-       #Stop-Process -Name AutodeskDesktopApp -Force
-		
-       ## WriteLogFile "UnInstallation completed successfully with exit code :$ExitCode" 
-
-}
-
-Catch
-{
-     ## WriteLogFile "Post-unInstallation is failed with exit code :$ExitCode" -Source 'unInstallation'
-     ## $ExitCode = $ReturnCode.ExitCode
-     ## exit-script -Exitcode $ExitCode
-     }
     }
     ElseIf ($deploymentType -ieq 'Repair') {
-        ##*===============================================
-        ##* PRE-REPAIR
-        ##*===============================================
-        [String]$installPhase = 'Pre-Repair'
-
-        ## Show Welcome Message, close Internet Explorer with a 60 second countdown before automatically closing
-        #Show-InstallationWelcome -CloseApps 'iexplore' -CloseAppsCountdown 60
-
-        ## Show Progress Message (with the default message)
-       ## Show-InstallationProgress
-
-        ## <Perform Pre-Repair tasks here>
-
         ##*===============================================
         ##* REPAIR
         ##*===============================================
         [String]$installPhase = 'Repair'
 
-        ## Handle Zero-Config MSI Repairs
-        If ($useDefaultMsi) {
-            [Hashtable]$ExecuteDefaultMSISplat = @{ Action = 'Repair'; Path = $defaultMsiFile; }; If ($defaultMstFile) {
-                $ExecuteDefaultMSISplat.Add('Transform', $defaultMstFile)
-            }
-            Execute-MSI @ExecuteDefaultMSISplat
+        Try {
+            Try { Uninstall-DotNetCleanupPackage } Catch { }
+            Install-DotNetCleanupPackage
         }
-        ## <Perform Repair tasks here>
-          ## EXECUTE-MSI (REPAIR)
-     Try{
-        ## Executes msiexec.exe to perform the following actions for MSI & MSP files and MSI product codes: install, uninstall, patch, repair, active setup.
-        ## Example: Execute-MSI -Action 'Repair' -Path '{PRODUCT-CODE}' -Parameters '/l*v $logFolder$appPkgName' -PassThru
-        # WriteLogFile " $installPhase : $appName repair started"
-        # $ReturnCode = Execute-MSI -Action 'Repair' -Path "$MSIProductCode" -Parameters "/l*v $logFolder$appPkgName_$installPhase.log REBOOT=ReallySuppress /qn" -PassThru
-        # $ExitCode = $ReturnCode.ExitCode
-        # WriteLogFile " $installPhase : $appName repair completed with exit code: $ExitCode"
+        Catch {
+            [Int32]$mainExitCode = 69003
+            Throw
         }
-
-        Catch
-      {
-       
-      #WriteLogFile "Repair is failed with exit code :$ExitCode" -Source 'Repair'
-      #$ExitCode = $ReturnCode.ExitCode
-      #exit-script -Exitcode $ExitCode
-      
-      }
-        ##*===============================================
-        ##* POST-REPAIR
-        ##*===============================================
-        [String]$installPhase = 'Post-Repair'
-
-        ## <Perform Post-Repair tasks here>
-
-
     }
     ##*===============================================
     ##* END SCRIPT BODY
@@ -684,9 +332,11 @@ Catch
     Exit-Script -ExitCode $mainExitCode
 }
 Catch {
-    ##[Int32]$mainExitCode = 60001
-    ##[String]$mainErrorMessage = "$(Resolve-Error)"
-   ## Write-Log -Message $mainErrorMessage -Severity 3 -Source $deployAppScriptFriendlyName
-   ## Show-DialogBox -Text $mainErrorMessage -Icon 'Stop'
-   ## Exit-Script -ExitCode $mainExitCode
+    [Int32]$mainExitCode = If ($mainExitCode -ne 0) { $mainExitCode } Else { 69099 }
+    Try {
+        Exit-Script -ExitCode $mainExitCode
+    }
+    Catch {
+        Exit $mainExitCode
+    }
 }
